@@ -11,6 +11,10 @@
 
 #include "KAGParser.h"
 #include "EventIntf.h"
+#include "ScriptMgnIntf.h"
+#include "tjsDictionary.h"
+#include "utils/DebugIntf.h"
+#include "TextStream.h"
 
 namespace TJS {
     ttstr TJSMapGlobalStringMap(const ttstr &string);
@@ -108,9 +112,6 @@ void tTVPScenarioCacheItem::LoadScenario(const ttstr &name, bool isstring) {
 
         try {
             stream = TVPCreateTextStreamForRead(name, TJS_W(""));
-            //			stream =
-            // TVPCreateTextStreamForReadByEncoding(name, TJS_W(""),
-            // TJS_W("Shift_JIS"));
             ttstr tmp;
             if(stream) {
                 stream->Read(tmp, 0);
