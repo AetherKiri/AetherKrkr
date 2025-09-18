@@ -1,10 +1,21 @@
 #ifndef _ncbind_hpp_
 #define _ncbind_hpp_
 
-#include "PluginStub.h"
+#include "tjsCommHead.h"
+#include "StorageImpl.h"
+#include "tjsNative.h"
+#include "ScriptMgnIntf.h"
+#include "tjsArray.h"
+#include "tjsDictionary.h"
+#include "DebugIntf.h"
+#include "MsgIntf.h"
+#include "CharacterSet.h"
+
 #include "ncb_invoke.hpp"
 #include <map>
 #include <list>
+
+inline std::set<ttstr> TVPRegisteredPlugins;
 
 ////////////////////////////////////////
 // ログ出力用マクロ
