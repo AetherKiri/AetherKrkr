@@ -14,6 +14,7 @@
 #include <fcntl.h>
 #include <filesystem>
 #include <sys/stat.h>
+#include <cocos/platform/CCPlatformConfig.h>
 
 #include "MsgIntf.h"
 
@@ -29,12 +30,9 @@
 #include "StringUtil.h"
 #include "FilePathUtil.h"
 #include "Platform.h"
-#include "platform/CCPlatformConfig.h"
 #include "dirent.h"
 #include "TickCount.h"
 #include "combase.h"
-
-#include "win32io.h"
 
 #include "spdlog/spdlog.h"
 

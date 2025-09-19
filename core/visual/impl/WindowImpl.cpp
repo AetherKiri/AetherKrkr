@@ -20,11 +20,11 @@
 #include "LayerIntf.h"
 // #include "WindowFormUnit.h"
 #include "SysInitIntf.h"
-#include "../../tjs2/tjsHashSearch.h"
+#include "tjsHashSearch.h"
 #include "StorageIntf.h"
 #include "VideoOvlIntf.h"
 #include "DebugIntf.h"
-#include "PluginImpl.h"
+#include "../../plugin/PluginImpl.h"
 #include "LayerManager.h"
 #include "EventImpl.h"
 

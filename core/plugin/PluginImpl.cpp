@@ -36,7 +36,7 @@
 
 #include "FilePathUtil.h"
 #include "Application.h"
-#include "SysInitImpl.h"
+#include "../base/impl/SysInitImpl.h"
 
 #ifdef _MSC_VER
 #define strcasecmp _stricmp

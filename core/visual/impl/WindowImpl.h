@@ -14,7 +14,7 @@
 
 // #include <myWindows/StdAfx.h>
 #include "WindowIntf.h"
-#include "win32/TVPWindow.h"
+#include "TVPWindow.h"
 
 #define WM_USER 0x0400
 
