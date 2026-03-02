@@ -11,6 +11,28 @@
 
 namespace PSB {
 
+    void PSBFile::resetState() {
+        charset = PSBArray();
+        namesData = PSBArray();
+        nameIndexes = PSBArray();
+        names.clear();
+
+        stringOffsets = PSBArray();
+        strings.clear();
+
+        chunkOffsets = PSBArray();
+        chunkLengths = PSBArray();
+        resources.clear();
+
+        extraChunkOffsets = PSBArray();
+        extraChunkLengths = PSBArray();
+        extraResources.clear();
+
+        _root.reset();
+        _header = PSBHeader{};
+        _type = PSBType::PSB;
+    }
+
     void PSBFile::loadKeys(TJS::tTJSBinaryStream *stream) {
         const size_t len = nameIndexes.value.size();
         names.reserve(len);
@@ -323,6 +345,7 @@ namespace PSB {
 
     bool PSBFile::loadPSBFile(const ttstr &filePath) {
         LOGGER->debug("load psb file: {}", filePath.AsStdString());
+        resetState();
         auto *s = TVPCreateStream(filePath);
         if(!s)
             return false;
