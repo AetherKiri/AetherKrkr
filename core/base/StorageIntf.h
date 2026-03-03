@@ -281,8 +281,18 @@ TJS_EXP_FUNC_DEF(void, TVPClearStorageCaches, ());
 
 // clear all internal storage related caches.
 void TVPRemoveFromStorageCache(const ttstr &name);
+void TVPClearArchiveCache();
+void TVPSetArchiveCacheCount(tjs_uint max_count);
+tjs_uint TVPGetArchiveCacheCount();
+tjs_uint TVPGetArchiveCacheLimit();
+
+void TVPSetAutoPathCacheMaxCount(tjs_uint max_count);
+tjs_uint TVPGetAutoPathCacheCount();
+tjs_uint TVPGetAutoPathCacheLimit();
+tjs_uint TVPGetAutoPathTableCount();
 
 extern tjs_uint TVPSegmentCacheLimit; // XP3 segment cache limit, in bytes.
+tjs_uint TVPGetXP3SegmentCacheTotalBytes();
 
 void TVPAutoMountSiblingXP3Archives();
 void TVPBoostAutoMountPaths();

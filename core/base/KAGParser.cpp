@@ -254,12 +254,9 @@ void TVPClearScnearioCache() { TVPScenarioCache.Clear(); }
 //---------------------------------------------------------------------------
 struct tTVPClearScenarioCacheCallback : public tTVPCompactEventCallbackIntf {
     void OnCompact(tjs_int level) override {
-        if(level >= TVP_COMPACT_LEVEL_DEACTIVATE) {
-            // clear the scenario cache
-#ifndef _DEBUG
-            TVPClearScnearioCache();
-#endif
-        }
+        // Scenario cache is limited to TVP_SCENARIO_MAX_CACHE_SIZE entries
+        // with built-in LRU eviction. Aggressive clearing causes repeated
+        // XP3 decompression (e.g. 6MB scenario files) and heap fragmentation.
     }
 } static TVPClearScenarioCacheCallback;
 
@@ -1611,12 +1608,22 @@ parse_start:
                     DicObj->PropSetByVS(TJS_MEMBERENSURE,
                                         __tag_name.AsVariantStringNoAddRef(),
                                         &tag_val, DicObj);
-                    tTJSVariant ch_val(ttstr(CurLineStr + CurPos, 1));
+                    // Process-lifetime cache: intentionally never freed
+                    static tTJSVariant *sCharCache[65536] = {};
+                    tTJSVariant *pCachedVal = nullptr;
+                    if((unsigned)ch < 65536)
+                        pCachedVal = sCharCache[(unsigned)ch];
+                    if(!pCachedVal) {
+                        pCachedVal = new tTJSVariant(
+                            TJS::TJSMapGlobalStringMap(ttstr(&ch, 1)));
+                        if((unsigned)ch < 65536)
+                            sCharCache[(unsigned)ch] = pCachedVal;
+                    }
                     static ttstr text_name(
-                        TJSMapGlobalStringMap(TJS_W("text")));
+                        TJS::TJSMapGlobalStringMap(TJS_W("text")));
                     DicObj->PropSetByVS(TJS_MEMBERENSURE,
                                         text_name.AsVariantStringNoAddRef(),
-                                        &ch_val, DicObj);
+                                        pCachedVal, DicObj);
 
                     if(RecordingMacro) {
                         if(ch == TJS_W('['))

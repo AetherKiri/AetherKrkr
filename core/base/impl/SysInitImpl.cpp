@@ -272,9 +272,9 @@ void TVPAfterSystemInit() {
     } else {
         TVPGraphicCacheSystemLimit = limitmb * 1024 * 1024;
     }
-    // 32bit なので 512MB までに制限
-    if(TVPGraphicCacheSystemLimit >= 512 * 1024 * 1024)
-        TVPGraphicCacheSystemLimit = 512 * 1024 * 1024;
+    // Cap at 256MB to leave headroom for VRAM, TJS heap, and system on mobile
+    if(TVPGraphicCacheSystemLimit >= 256 * 1024 * 1024)
+        TVPGraphicCacheSystemLimit = 256 * 1024 * 1024;
 
     if(TVPTotalPhysMemory <= 64 * 1024 * 1024)
         TVPSetFontCacheForLowMem();
