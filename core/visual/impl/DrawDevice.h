@@ -552,6 +552,8 @@ protected:
     virtual ~tTVPDrawDevice(); //!< デストラクタ
 
 public:
+    iTVPWindow *GetWindowInterface() const { return Window; }
+
     //! @brief		指定位置にあるレイヤマネージャを得る
     //! @param		index		インデックス(0～)
     //! @return

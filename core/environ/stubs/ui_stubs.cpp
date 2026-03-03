@@ -32,6 +32,12 @@
 #include <GLES3/gl3.h>
 
 // ---------------------------------------------------------------------------
+// Live2D post-draw hook — called after scene blit in UpdateDrawBuffer
+// ---------------------------------------------------------------------------
+static void (*g_postDrawHook)() = nullptr;
+void TVPSetPostDrawHook(void (*hook)()) { g_postDrawHook = hook; }
+
+// ---------------------------------------------------------------------------
 // FlutterWindowLayer — concrete iWindowLayer for Flutter host mode.
 // Provides a logical window backed by the ANGLE EGL Pbuffer surface.
 // Rendering output goes through glReadPixels in the engine_api layer.
@@ -349,6 +355,8 @@ public:
         glBindBuffer(GL_ARRAY_BUFFER, 0);
         glUseProgram(0);
         glBindTexture(GL_TEXTURE_2D, 0);
+
+        if (g_postDrawHook) g_postDrawHook();
 
         // In IOSurface/WindowSurface mode, glFlush() is sufficient —
         // IOSurface has GPU-GPU sync, and WindowSurface (SurfaceTexture)

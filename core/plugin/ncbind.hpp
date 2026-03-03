@@ -2289,22 +2289,34 @@ struct  ncbNativeFunctionAutoRegister : public ncbAutoRegister {
 protected:
 	template <typename MethodT>
 	static void RegistFunction(NameT name, NameT attach, MethodT m) {
-		typedef ncbNativeClassMethodBase::InvokeType IVT;
-		typedef ncbNativeClassMethod< IVT::InvokeCommand<void, MethodT, IVT::ivtNormal> > MethodObjectT;
-		iTJSDispatch2 *dsp = GetDispatch(attach);
-		if (!dsp) {
-			TVPAddLog(ttstr(TJS_W("FAILED: get dispatch for attach target: ")) + attach + TJS_W(" when registering: ") + name);
-			return;
+		try {
+			typedef ncbNativeClassMethodBase::InvokeType IVT;
+			typedef ncbNativeClassMethod< IVT::InvokeCommand<void, MethodT, IVT::ivtNormal> > MethodObjectT;
+			iTJSDispatch2 *dsp = GetDispatch(attach);
+			if (!dsp) {
+				TVPAddLog(ttstr(TJS_W("FAILED: get dispatch for attach target: ")) + (attach ? attach : TJS_W("<null>")) + TJS_W(" when registering: ") + name);
+				return;
+			}
+			RegistItem(dsp, name, new MethodObjectT(m));
+		} catch (const eTJS &e) {
+			TVPAddLog(ttstr(TJS_W("FAILED: RegistFunction threw for attach target: ")) + (attach ? attach : TJS_W("<null>")) + TJS_W(" name: ") + name + TJS_W(" message: ") + e.GetMessage());
+		} catch (...) {
+			TVPAddLog(ttstr(TJS_W("FAILED: RegistFunction threw unknown exception for attach target: ")) + (attach ? attach : TJS_W("<null>")) + TJS_W(" name: ") + name);
 		}
-		RegistItem(dsp, name, new MethodObjectT(m));
 	}
 	static void RegistFunction(NameT name, NameT attach, ncbTypedefs::CallbackT m) {
-		iTJSDispatch2 *dsp = GetDispatch(attach);
-		if (!dsp) {
-			TVPAddLog(ttstr(TJS_W("FAILED: get dispatch for attach target: ")) + attach + TJS_W(" when registering: ") + name);
-			return;
+		try {
+			iTJSDispatch2 *dsp = GetDispatch(attach);
+			if (!dsp) {
+				TVPAddLog(ttstr(TJS_W("FAILED: get dispatch for attach target: ")) + (attach ? attach : TJS_W("<null>")) + TJS_W(" when registering: ") + name);
+				return;
+			}
+			RegistItem(dsp, name, TJSCreateNativeClassMethod(m));
+		} catch (const eTJS &e) {
+			TVPAddLog(ttstr(TJS_W("FAILED: RegistFunction(raw) threw for attach target: ")) + (attach ? attach : TJS_W("<null>")) + TJS_W(" name: ") + name + TJS_W(" message: ") + e.GetMessage());
+		} catch (...) {
+			TVPAddLog(ttstr(TJS_W("FAILED: RegistFunction(raw) threw unknown exception for attach target: ")) + (attach ? attach : TJS_W("<null>")) + TJS_W(" name: ") + name);
 		}
-		RegistItem(dsp, name, TJSCreateNativeClassMethod(m));
 	}
 	template <typename T>
 	static inline void RegistItem(iTJSDispatch2 *dsp, NameT name, T *mobj) {
@@ -2325,26 +2337,54 @@ protected:
 
 private:
 	static iTJSDispatch2* GetDispatch(NameT attach) {
-		iTJSDispatch2 *ret, *global = TVPGetScriptDispatch();
+		iTJSDispatch2 *ret = nullptr;
+		iTJSDispatch2 *global = TVPGetScriptDispatch();
 		if (!global) return nullptr;
-
-		if (!attach) ret = global;
-		else {
-			tTJSVariant val;
-			NameT p = attach;
-			// ピリオド有無チェック
-			while (*p) if (*p++ == TJS_W('.')) break;
-			if (!*p) {
-				// global直下
-				global->PropGet(0, attach, nullptr, &val, global);
+		try {
+			if (!attach) {
+				ret = global;
 			} else {
-				// 複数階層奥の場合は面倒なのでevalで誤魔化す
-				TVPExecuteExpression(ttstr(attach), &val);
+				tTJSVariant val;
+				NameT p = attach;
+				// ピリオド有無チェック
+				while (*p) if (*p++ == TJS_W('.')) break;
+				tjs_error er = TJS_E_FAIL;
+				if (!*p) {
+					// global直下
+					er = global->PropGet(0, attach, nullptr, &val, global);
+				} else {
+					// 複数階層奥の場合は面倒なのでevalで誤魔化す
+					try {
+						TVPExecuteExpression(ttstr(attach), &val);
+						er = TJS_S_OK;
+					} catch(...) {
+						er = TJS_E_MEMBERNOTFOUND;
+					}
+				}
+				if (TJS_FAILED(er)) {
+					global->Release();
+					return nullptr;
+				}
+
+				tTJSVariantType vt = val.Type();
+				if (vt != tvtObject) {
+					TVPAddLog(ttstr(TJS_W("FAILED: attach target is not object: ")) + attach + TJS_W(" type=") + ttstr((tjs_int)vt));
+					global->Release();
+					return nullptr;
+				}
+				ret = val.AsObject();
+				global->Release();
 			}
-			ret = val.AsObject();
+			return ret;
+		} catch (const eTJS &e) {
+			TVPAddLog(ttstr(TJS_W("FAILED: GetDispatch threw for attach target: ")) + (attach ? attach : TJS_W("<null>")) + TJS_W(" message: ") + e.GetMessage());
 			global->Release();
+			return nullptr;
+		} catch (...) {
+			TVPAddLog(ttstr(TJS_W("FAILED: GetDispatch threw unknown exception for attach target: ")) + (attach ? attach : TJS_W("<null>")));
+			global->Release();
+			return nullptr;
 		}
-		return ret;
 	}
 };
 template <typename DUMMY>

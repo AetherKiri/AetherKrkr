@@ -13,6 +13,8 @@
 #include "EventImpl.h"
 #include "WindowImpl.h"
 #include "RenderManager.h"
+#include "DrawDeviceGLESModule.h"
+using namespace DrawDeviceGLES;
 
 #define ZeroMemory(p, n) memset(p, 0, n);
 // #include <d3d9.h>
@@ -876,6 +878,14 @@ TJS_BEGIN_NATIVE_METHOD_DECL(/*func. name*/ recreate) {
     return TJS_S_OK;
 }
 TJS_END_NATIVE_METHOD_DECL(/*func. name*/ recreate)
+
+//----------------------------------------------------------------------
+TJS_BEGIN_NATIVE_METHOD_DECL(/*func. name*/ getModule) {
+    TJS_GET_NATIVE_INSTANCE(/*var. name*/ _this,
+                            /*var. type*/ tTJSNI_BasicDrawDevice);
+    return GetModuleForDevice(_this->GetDevice(), result, numparams, param);
+}
+TJS_END_NATIVE_METHOD_DECL(/*func. name*/ getModule)
 //----------------------------------------------------------------------
 
 //---------------------------------------------------------------------------
@@ -956,6 +966,7 @@ tTJSNI_BasicDrawDevice::tTJSNI_BasicDrawDevice() {
 }
 //---------------------------------------------------------------------------
 tTJSNI_BasicDrawDevice::~tTJSNI_BasicDrawDevice() {
+    ClearCachedModulesForDevice(Device);
     if(Device)
         Device->Destruct(), Device = nullptr;
 }
@@ -967,6 +978,7 @@ tjs_error tTJSNI_BasicDrawDevice::Construct(tjs_int numparams,
 }
 //---------------------------------------------------------------------------
 void tTJSNI_BasicDrawDevice::Invalidate() {
+    ClearCachedModulesForDevice(Device);
     if(Device)
         Device->Destruct(), Device = nullptr;
 }
