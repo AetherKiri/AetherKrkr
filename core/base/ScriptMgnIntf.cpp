@@ -380,11 +380,13 @@ ttstr TVPStartupScriptName(TJS_W("startup.tjs"));
 //---------------------------------------------------------------------------
 class tTVPTJSGCCallback : public tTVPCompactEventCallbackIntf {
     void OnCompact(tjs_int level) override {
-        // OnCompact method from tTVPCompactEventCallbackIntf
-        // called when the application is idle, deactivated,
-        // minimized, or etc...
         if(TVPScriptEngine) {
-            if(level >= TVP_COMPACT_LEVEL_IDLE) {
+            if(level >= TVP_COMPACT_LEVEL_MINIMIZE) {
+                tjs_int compactLevel = (level >= TVP_COMPACT_LEVEL_MAX) ? 3 : 2;
+                TVPScriptEngine->CompactScriptCache(compactLevel);
+                TVPScriptEngine->DoGarbageCollection(true);
+            } else if(level >= TVP_COMPACT_LEVEL_IDLE) {
+                TVPScriptEngine->CompactScriptCache(1);
                 TVPScriptEngine->DoGarbageCollection();
             }
         }

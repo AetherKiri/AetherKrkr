@@ -626,7 +626,16 @@ namespace TJS {
     void TJSVariantArrayStackCompact() { TJSCompactVariantArrayMagic++; }
 
     //---------------------------------------------------------------------------
-    void TJSVariantArrayStackCompactNow() {}
+    static tTJSVariantArrayStack *TJSGlobalVariantArrayStack = nullptr;
+
+    void TJSSetGlobalVariantArrayStack(tTJSVariantArrayStack *stack) {
+        TJSGlobalVariantArrayStack = stack;
+    }
+
+    void TJSVariantArrayStackCompactNow() {
+        if(TJSGlobalVariantArrayStack)
+            TJSGlobalVariantArrayStack->Compact();
+    }
     //---------------------------------------------------------------------------
     //---------------------------------------------------------------------------
 
@@ -653,14 +662,14 @@ namespace TJS {
 
             tTJSObjectProxy proxy;
             if(objthis) {
-                proxy.SetObjects(objthis, Block->GetTJS()->GetGlobalNoAddRef());
+                proxy.SetObjects(objthis, CachedTJSEngine->GetGlobalNoAddRef());
                 // TODO: caching of objthis-proxy
 
                 ra[-2] = &proxy;
             } else {
                 proxy.SetObjects(nullptr, nullptr);
 
-                iTJSDispatch2 *global = Block->GetTJS()->GetGlobalNoAddRef();
+                iTJSDispatch2 *global = CachedTJSEngine->GetGlobalNoAddRef();
 
                 ra[-2].SetObject(global, global);
             }
@@ -671,7 +680,7 @@ namespace TJS {
                                     // TODO: caching of objthis-proxy
                                     tTJSObjectProxy *proxy = new
                tTJSObjectProxy(); proxy->SetObjects(objthis,
-               Block->GetTJS()->GetGlobalNoAddRef());
+               CachedTJSEngine->GetGlobalNoAddRef());
 
                                     ra[-2] = proxy;
 
@@ -680,7 +689,7 @@ namespace TJS {
                             else
                             {
                                     iTJSDispatch2 *global =
-               Block->GetTJS()->GetGlobalNoAddRef();
+               CachedTJSEngine->GetGlobalNoAddRef();
 
                                     ra[-2].SetObject(global, global);
                             }
@@ -690,8 +699,8 @@ namespace TJS {
 
             // check whether the objthis is deleting
             if(TJSWarnOnExecutionOnDeletingObject && TJSObjectFlagEnabled() &&
-               Block->GetTJS()->GetConsoleOutput())
-                TJSWarnIfObjectIsDeleting(Block->GetTJS()->GetConsoleOutput(),
+               CachedTJSEngine->GetConsoleOutput())
+                TJSWarnIfObjectIsDeleting(CachedTJSEngine->GetConsoleOutput(),
                                           objthis);
 
 #ifdef _DEBUG
@@ -802,7 +811,8 @@ namespace TJS {
             }
         }
 
-        tTJS *tjs = Block->GetTJS();
+        if(!Block) return;
+        tTJS *tjs = CachedTJSEngine;
         ttstr info{ fmt::format(
             "==== An exception occurred at {}, VM ip = {} ==== ",
             GetPositionDescriptionString(codepos).AsNarrowStdString(),
@@ -1300,7 +1310,7 @@ namespace TJS {
 
                     case VM_GLOBAL:
                         TJS_GET_VM_REG(ra, code[1]) =
-                            Block->GetTJS()->GetGlobalNoAddRef();
+                            CachedTJSEngine->GetGlobalNoAddRef();
                         code += 2;
                         break;
 
@@ -1384,21 +1394,21 @@ namespace TJS {
             if(exobjreg) {
                 tTJSVariant msg(e.GetMessage());
                 tTJSVariant trace(e.GetTrace());
-                TJSGetExceptionObject(Block->GetTJS(), ra + exobjreg, msg,
+                TJSGetExceptionObject(CachedTJSEngine, ra + exobjreg, msg,
                                       &trace);
             }
             return catchip;
         } catch(eTJS &e) {
             if(exobjreg) {
                 tTJSVariant msg(e.GetMessage());
-                TJSGetExceptionObject(Block->GetTJS(), ra + exobjreg, msg,
+                TJSGetExceptionObject(CachedTJSEngine, ra + exobjreg, msg,
                                       nullptr);
             }
             return catchip;
         } catch(std::exception &e) {
             if(exobjreg) {
                 tTJSVariant msg(e.what());
-                TJSGetExceptionObject(Block->GetTJS(), ra + exobjreg, msg,
+                TJSGetExceptionObject(CachedTJSEngine, ra + exobjreg, msg,
                                       nullptr);
             }
             return catchip;
@@ -2682,9 +2692,9 @@ namespace TJS {
             ttstr str(val);
             if(!str.IsEmpty()) {
                 if(resneed)
-                    Block->GetTJS()->EvalExpression(str, &res, objthis);
+                    CachedTJSEngine->EvalExpression(str, &res, objthis);
                 else
-                    Block->GetTJS()->EvalExpression(str, nullptr, objthis);
+                    CachedTJSEngine->EvalExpression(str, nullptr, objthis);
             }
             if(resneed)
                 val = res;
@@ -2819,7 +2829,7 @@ namespace TJS {
                 case ctTopLevel:
                     ExecuteAsFunction(
                         objthis ? objthis
-                                : Block->GetTJS()->GetGlobalNoAddRef(),
+                                : CachedTJSEngine->GetGlobalNoAddRef(),
                         nullptr, 0, result, 0);
                     break;
 

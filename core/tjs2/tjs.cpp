@@ -28,6 +28,8 @@
 #include "tjsRandomGenerator.h"
 #include "tjsGlobalStringMap.h"
 #include "tjsDebug.h"
+
+extern "C" void TJS_CollectOrphanedICCs(bool force = false);
 #include "tjsByteCodeLoader.h"
 #include "tjsBinarySerializer.h"
 #include "tjsRegExp.h"
@@ -104,6 +106,7 @@ namespace TJS {
         // ensure variant array stack for function stack
         //	TJSVariantArrayStackAddRef();
         VariantArrayStack = new tTJSVariantArrayStack;
+        TJSSetGlobalVariantArrayStack(VariantArrayStack);
 
         // ensure hash table for reserved words
         TJSReservedWordsHashAddRef();
@@ -204,6 +207,7 @@ namespace TJS {
     //---------------------------------------------------------------------------
     void tTJS::Cleanup() {
         TJSVariantArrayStackCompactNow();
+        TJSSetGlobalVariantArrayStack(nullptr);
         //	TJSVariantArrayStackRelease();
         delete VariantArrayStack;
         VariantArrayStack = nullptr;
@@ -492,10 +496,16 @@ namespace TJS {
     }
 
     //---------------------------------------------------------------------------
-    void tTJS::DoGarbageCollection() {
-        // do garbage collection
+    void tTJS::DoGarbageCollection(bool force) {
         TJSVariantArrayStackCompactNow();
         TJSCompactStringHeap();
+        TJS_CollectOrphanedICCs(force);
+    }
+
+    //---------------------------------------------------------------------------
+    void tTJS::CompactScriptCache(tjs_int level) {
+        if(Cache)
+            Cache->Compact(level);
     }
 
     //---------------------------------------------------------------------------

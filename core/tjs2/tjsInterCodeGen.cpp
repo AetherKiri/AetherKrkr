@@ -11,6 +11,10 @@
 #include "tjsCommHead.h"
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <mutex>
+#include <unordered_map>
 #include <spdlog/spdlog.h>
 #include "tjsInterCodeGen.h"
 #include "tjsScriptBlock.h"
@@ -18,6 +22,59 @@
 
 #include "tjs.tab.hpp"
 #include "tjsError.h"
+
+static std::atomic<int64_t> sTJSInterCodeContextCount{0};
+
+extern "C" int64_t TJS_GetInterCodeContextCount() {
+    return sTJSInterCodeContextCount.load(std::memory_order_relaxed);
+}
+
+//---------------------------------------------------------------------------
+// Orphaned ICC registry for cycle-breaking GC
+//---------------------------------------------------------------------------
+namespace {
+    using SteadyClock = std::chrono::steady_clock;
+    using TimePoint   = SteadyClock::time_point;
+
+    std::mutex sOrphanMutex;
+    std::unordered_map<TJS::tTJSInterCodeContext*, TimePoint> sOrphanICCs;
+}
+
+static void RegisterOrphanICC(TJS::tTJSInterCodeContext *icc) {
+    std::lock_guard<std::mutex> lock(sOrphanMutex);
+    sOrphanICCs[icc] = SteadyClock::now();
+}
+
+static void UnregisterOrphanICC(TJS::tTJSInterCodeContext *icc) {
+    std::lock_guard<std::mutex> lock(sOrphanMutex);
+    sOrphanICCs.erase(icc);
+}
+
+extern "C" void TJS_CollectOrphanedICCs(bool force) {
+    std::vector<TJS::tTJSInterCodeContext*> toCollect;
+    {
+        auto now = SteadyClock::now();
+        std::lock_guard<std::mutex> lock(sOrphanMutex);
+        for(auto &[icc, ts] : sOrphanICCs) {
+            if(force || std::chrono::duration_cast<std::chrono::seconds>(
+                            now - ts).count() >= 10)
+                toCollect.push_back(icc);
+        }
+        for(auto *icc : toCollect)
+            sOrphanICCs.erase(icc);
+    }
+    if(toCollect.empty()) return;
+    for(auto *icc : toCollect)
+        icc->Release();
+    spdlog::debug("TJS_CollectOrphanedICCs: released {} orphaned ICCs{}",
+                  (int)toCollect.size(), force ? " (forced)" : "");
+}
+
+extern "C" int64_t TJS_GetOrphanedICCCount() {
+    std::lock_guard<std::mutex> lock(sOrphanMutex);
+    return (int64_t)sOrphanICCs.size();
+}
+
 #include "tjsUtils.h"
 #include "tjsDebug.h"
 #include "tjsConstArrayData.h"
@@ -169,6 +226,7 @@ namespace TJS // following is in the namespace
                                                tTJSScriptBlock *block,
                                                tTJSContextType type) :
         inherited(TJSGetContextHashSize(type)), Properties(nullptr) {
+        sTJSInterCodeContextCount.fetch_add(1, std::memory_order_relaxed);
         inherited::CallFinalize = false;
         // this notifies to the class ancestor - "tTJSCustomObject",
         // not to call "finalize" TJS method at the invalidation.
@@ -254,12 +312,11 @@ namespace TJS // following is in the namespace
             }
 
             Block = block;
+            CachedTJSEngine = block->GetTJS();
             block->Add(this);
-            TJSVariantArrayStack = block->GetTJS()->GetVariantArrayStack();
-            if(ContextType != ctTopLevel)
+            TJSVariantArrayStack = CachedTJSEngine->GetVariantArrayStack();
+            if(ContextType != ctTopLevel && !block->IsExpressionMode())
                 Block->AddRef();
-            // owner ScriptBlock hooks global object, so to avoid
-            // mutual reference lock.
 
             if(ContextType == ctClass) {
                 // add class information to the class instance
@@ -300,6 +357,7 @@ namespace TJS // following is in the namespace
         tSourcePos *srcPos, tjs_int srcPosSize,
         std::vector<tjs_int> &superpointer) :
         inherited(TJSGetContextHashSize(type)), Properties(nullptr) {
+        sTJSInterCodeContextCount.fetch_add(1, std::memory_order_relaxed);
         inherited::CallFinalize = false;
         Parent = nullptr;
         PropGetter = PropSetter = SuperClassGetter = nullptr;
@@ -355,7 +413,8 @@ namespace TJS // following is in the namespace
             AsGlobalContextMode = false;
             ContextType = type;
             Block = block;
-            TJSVariantArrayStack = block->GetTJS()->GetVariantArrayStack();
+            CachedTJSEngine = block->GetTJS();
+            TJSVariantArrayStack = CachedTJSEngine->GetVariantArrayStack();
         } catch(...) {
             delete[] Name;
             throw;
@@ -364,13 +423,25 @@ namespace TJS // following is in the namespace
 
     //---------------------------------------------------------------------------
     tTJSInterCodeContext::~tTJSInterCodeContext() {
+        sTJSInterCodeContextCount.fetch_sub(1, std::memory_order_relaxed);
         if(Name)
             delete[] Name;
         Name = nullptr;
     }
 
     //---------------------------------------------------------------------------
+    void tTJSInterCodeContext::ClearBlockPointer() {
+        if(!Block) return;
+        Block = nullptr;
+        AddRef();
+        RegisterOrphanICC(this);
+    }
+
+    //---------------------------------------------------------------------------
     void tTJSInterCodeContext::Finalize() {
+        if(!Block)
+            UnregisterOrphanICC(this);
+
         if(PropSetter)
             PropSetter->Release(), PropSetter = nullptr;
         if(PropGetter)
@@ -391,10 +462,11 @@ namespace TJS // following is in the namespace
             DataArea = nullptr;
         }
 
-        Block->Remove(this);
-
-        if(ContextType != ctTopLevel && Block)
-            Block->Release();
+        if(Block) {
+            Block->Remove(this);
+            if(ContextType != ctTopLevel && !Block->IsExpressionMode())
+                Block->Release();
+        }
 
         Namespace.Clear();
 
@@ -571,7 +643,7 @@ namespace TJS // following is in the namespace
 
         str += { fmt::format(" line {}", 1 + Block->SrcPosToLine(errpos)) };
 
-        Block->GetTJS()->OutputToConsole(str.c_str());
+        CachedTJSEngine->OutputToConsole(str.c_str());
     }
     //---------------------------------------------------------------------------
 
@@ -1070,6 +1142,7 @@ namespace TJS // following is in the namespace
             return 0;
 
         tjs_int srcpos = CodePosToSrcPos(codepos);
+        if(!Block) return 0;
         tjs_int line = Block->SrcPosToLine(srcpos);
         srcpos = Block->LineToSrcPos(line);
 
@@ -1088,6 +1161,9 @@ namespace TJS // following is in the namespace
     //---------------------------------------------------------------------------
     ttstr
     tTJSInterCodeContext::GetPositionDescriptionString(tjs_int codepos) const {
+        if(!Block)
+            return ttstr(TJS_W("(expression)")) +
+                TJS_W("[") + GetShortDescription() + TJS_W("]");
         return Block->GetLineDescriptionString(CodePosToSrcPos(codepos)) +
             TJS_W("[") + GetShortDescription() + TJS_W("]");
     }

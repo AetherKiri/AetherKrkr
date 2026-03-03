@@ -15,11 +15,20 @@
 #include "tjsConstArrayData.h"
 #include "tjs.h"
 
+#include <atomic>
+
+static std::atomic<int64_t> sTJSScriptBlockCount{0};
+
+extern "C" int64_t TJS_GetScriptBlockCount() {
+    return sTJSScriptBlockCount.load(std::memory_order_relaxed);
+}
+
 namespace TJS {
     //---------------------------------------------------------------------------
     // tTJSScriptBlock
     //---------------------------------------------------------------------------
     tTJSScriptBlock::tTJSScriptBlock(tTJS *owner) {
+        sTJSScriptBlockCount.fetch_add(1, std::memory_order_relaxed);
         RefCount = 1;
         Owner = owner;
         Owner->AddRef();
@@ -32,6 +41,7 @@ namespace TJS {
         LexicalAnalyzer = nullptr;
 
         UsingPreProcessor = false;
+        ExpressionMode = false;
 
         LineOffset = 0;
 
@@ -42,6 +52,7 @@ namespace TJS {
     // for Bytecode
     tTJSScriptBlock::tTJSScriptBlock(tTJS *owner, const tjs_char *name,
                                      tjs_int lineoffset) {
+        sTJSScriptBlockCount.fetch_add(1, std::memory_order_relaxed);
         RefCount = 1;
         Owner = owner;
         Owner->AddRef();
@@ -58,12 +69,20 @@ namespace TJS {
         LexicalAnalyzer = nullptr;
 
         UsingPreProcessor = false;
+        ExpressionMode = false;
 
         Owner->AddScriptBlock(this);
     }
 
     //---------------------------------------------------------------------------
     tTJSScriptBlock::~tTJSScriptBlock() {
+        sTJSScriptBlockCount.fetch_sub(1, std::memory_order_relaxed);
+
+        if(ExpressionMode) {
+            for(auto *ctx : InterCodeContextList)
+                ctx->ClearBlockPointer();
+        }
+
         if(TopLevelContext)
             TopLevelContext->Release(), TopLevelContext = nullptr;
         while(!ContextStack.empty()) {
@@ -307,7 +326,7 @@ namespace TJS {
             // execute global level script
             ExecuteTopLevelScript(result, context);
         } catch(...) {
-            if(InterCodeContextList.size() != 1) {
+            if(InterCodeContextList.size() != 1 && !ExpressionMode) {
                 if(TopLevelContext)
                     TopLevelContext->Release(), TopLevelContext = nullptr;
                 while(ContextStack.size()) {
@@ -318,10 +337,7 @@ namespace TJS {
             throw;
         }
 
-        if(InterCodeContextList.size() != 1) {
-            // this is not a single-context script block
-            // (may hook itself)
-            // release all contexts and global at this time
+        if(InterCodeContextList.size() != 1 && !ExpressionMode) {
             if(TopLevelContext)
                 TopLevelContext->Release(), TopLevelContext = nullptr;
             while(ContextStack.size()) {
@@ -350,7 +366,7 @@ namespace TJS {
             // execute global level script
             ExecuteTopLevelScript(result, context);
         } catch(...) {
-            if(InterCodeContextList.size() != 1) {
+            if(InterCodeContextList.size() != 1 && !ExpressionMode) {
                 if(TopLevelContext)
                     TopLevelContext->Release(), TopLevelContext = nullptr;
                 while(ContextStack.size()) {
@@ -361,10 +377,7 @@ namespace TJS {
             throw;
         }
 
-        if(InterCodeContextList.size() != 1) {
-            // this is not a single-context script block
-            // (may hook itself)
-            // release all contexts and global at this time
+        if(InterCodeContextList.size() != 1 && !ExpressionMode) {
             if(TopLevelContext)
                 TopLevelContext->Release(), TopLevelContext = nullptr;
             while(ContextStack.size()) {

@@ -446,6 +446,7 @@ namespace TJS {
         tjs_char *Name;
         tTJSInterCodeContext *Parent;
         tTJSScriptBlock *Block;
+        tTJS *CachedTJSEngine;
         tTJSContextType ContextType;
         tTJSInterCodeContext *PropSetter;
         tTJSInterCodeContext *PropGetter;
@@ -466,6 +467,8 @@ namespace TJS {
         ttstr GetShortDescriptionWithClassName() const;
 
         tTJSScriptBlock *GetBlock() const { return Block; }
+        tTJS *GetTJS() const { return CachedTJSEngine; }
+        void ClearBlockPointer();
 
 #ifdef _DEBUG
         ttstr GetClassName() const;

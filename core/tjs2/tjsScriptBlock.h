@@ -56,11 +56,14 @@ namespace TJS {
         tjs_int FirstErrorPos;
 
         bool UsingPreProcessor;
+        bool ExpressionMode;
 
     public:
         tjs_int CompileErrorCount;
 
         [[nodiscard]] tTJS *GetTJS() const { return Owner; }
+        void SetExpressionMode(bool v) { ExpressionMode = v; }
+        [[nodiscard]] bool IsExpressionMode() const { return ExpressionMode; }
 
         void AddRef();
         void Release();
@@ -77,6 +80,8 @@ namespace TJS {
         GetTotalVMDataSize() const; // returns in tTJSVariant count
 
         [[nodiscard]] bool IsReusable() const {
+            if(ExpressionMode)
+                return TopLevelContext != nullptr && !UsingPreProcessor;
             return GetContextCount() == 1 && TopLevelContext != nullptr &&
                 !UsingPreProcessor;
         }
