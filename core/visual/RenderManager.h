@@ -151,6 +151,8 @@ public:
      */
     virtual uint32_t GetNativeGLTextureId() const { return 0; }
 
+    virtual void CompactGPUCache() {}
+
     static void RecycleProcess();
 };
 

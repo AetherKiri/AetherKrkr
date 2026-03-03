@@ -340,10 +340,13 @@ bool tTVPBitmap::Is8bit() const {
 static std::vector<iTVPTexture2D *> _toDeleteTextures;
 
 void iTVPTexture2D::RecycleProcess() {
+    if(_toDeleteTextures.empty())
+        return;
     for(iTVPTexture2D *tex : _toDeleteTextures) {
         delete tex;
     }
     _toDeleteTextures.clear();
+    glFlush();
 }
 static tTVPAtExit TVPReleaseTexture2D(TVP_ATEXIT_PRI_RELEASE + 500,
                                       iTVPTexture2D::RecycleProcess);

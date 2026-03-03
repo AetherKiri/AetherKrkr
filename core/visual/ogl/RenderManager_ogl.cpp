@@ -1164,6 +1164,8 @@ static TVPTextureFormat::e _GetTextureFormatFromBPP(int bpp) {
 }
 
 class tTVPOGLTexture2D_split : public tTVPOGLTexture2D {
+    static constexpr size_t MAX_SPLIT_CACHE_ENTRIES = 8;
+
     struct GLTextureInfoPoint {
         uint16_t X, Y; // max to 65535 x 65535
     };
@@ -1182,15 +1184,14 @@ class tTVPOGLTexture2D_split : public tTVPOGLTexture2D {
     std::map<uint32_t /*GLTextureInfoIndexer.Index*/, GLTextureInfo>
         CachedTexture;
     tTVPBitmap *Bitmap;
+    uint64_t _cachedVMemBytes = 0;
 
     void ClearTextureCache() {
-        // 		for (GLuint& name : UnusedTextureName) {
-        // 			krkr::gl::DeleteTexture(name);
-        // 		}
-        // 		UnusedTextureName.clear();
         for(auto &it : CachedTexture) {
             krkr::gl::DeleteTexture(it.second.Name);
         }
+        _totalVMemSize -= _cachedVMemBytes;
+        _cachedVMemBytes = 0;
         CachedTexture.clear();
         texture = 0;
     }
@@ -1222,11 +1223,20 @@ public:
         Bitmap->AddRef();
     }
     ~tTVPOGLTexture2D_split() override {
-        internalW = 0;
-        internalH = 0;
         ClearTextureCache();
-        Bitmap->Release();
+        if(Bitmap) {
+            internalW = 0;
+            internalH = 0;
+            Bitmap->Release();
+        }
+        // When Bitmap is null (single texture via AsSingleTexture),
+        // keep internalW/H so base destructor correctly subtracts from _totalVMemSize
     }
+    void CompactGPUCache() override {
+        if(!CachedTexture.empty())
+            ClearTextureCache();
+    }
+
     const void *GetScanLineForRead(tjs_uint l) override {
         return Bitmap->GetScanLine(l);
     }
@@ -1303,6 +1313,8 @@ public:
                 break;
         }
 
+        uint64_t oldBytes = (uint64_t)texinfo.Width * texinfo.Height * pixsize;
+
         TVPCheckMemory();
         _glBindTexture2D(texinfo.Name);
         texinfo.Width = pitch / pixsize;
@@ -1343,7 +1355,10 @@ public:
                          Bitmap->GetScanLine(rc.top));
         }
 
-        // if size is same, is's better to use glTexSubImage2D
+        uint64_t newBytes = (uint64_t)texinfo.Width * texinfo.Height * pixsize;
+        _cachedVMemBytes += newBytes - oldBytes;
+        _totalVMemSize += newBytes - oldBytes;
+
         CHECK_GL_ERROR_DEBUG();
     }
 
@@ -1404,6 +1419,7 @@ public:
         texture = FetchGLTexture();
         glTexImage2D(GL_TEXTURE_2D, 0, internalfmt, internalW, internalH, 0,
                      pixfmt, GL_UNSIGNED_BYTE, tmp);
+        _totalVMemSize += (uint64_t)internalW * internalH * getPixelSize();
 
         delete[] tmp;
     }
@@ -1456,6 +1472,8 @@ public:
                 UpdateTextureData(*texinfo, rc);
             }
         } else {
+            if(CachedTexture.size() >= MAX_SPLIT_CACHE_ENTRIES)
+                ClearTextureCache();
             texture = FetchGLTexture();
             texinfo = &CachedTexture[indexer.Index];
             texinfo->Name = texture;
@@ -1524,10 +1542,11 @@ public:
             //	it->second.LastAccessTimeStamp = 120; // max to 120
             // frames ?
         } else {
+            if(CachedTexture.size() >= MAX_SPLIT_CACHE_ENTRIES)
+                ClearTextureCache();
             texture = FetchGLTexture();
             texinfo = &CachedTexture[indexer.Index];
             texinfo->Name = texture;
-            //	texinfo->LastAccessTimeStamp = 120;
             texinfo->Point = indexer.Point;
             UpdateTextureData(*texinfo, rc);
         }

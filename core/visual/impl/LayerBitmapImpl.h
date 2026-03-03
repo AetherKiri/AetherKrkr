@@ -153,6 +153,7 @@ public:
     [[nodiscard]] iTVPTexture2D *GetTexture() const { return Bitmap; }
     virtual iTVPTexture2D *GetTextureForRender(bool isBlendTarget,
                                                const tTVPRect *rc);
+    void CompactGPUCache();
 #if 0
 	tjs_uint GetPalette( tjs_uint index ) const;
 	void SetPalette( tjs_uint index, tjs_uint color );

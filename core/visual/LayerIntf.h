@@ -24,6 +24,8 @@
 // global flags
 //---------------------------------------------------------------------------
 extern bool TVPFreeUnusedLayerCache;
+extern tjs_int TVPGetLayerCount();
+extern tjs_uint64 TVPGetLayerTotalBitmapBytes();
 
 //---------------------------------------------------------------------------
 // initial bitmap holder ( since tTVPBaseBitmap cannot create empty
@@ -417,6 +419,10 @@ public:
     tTVPBaseTexture *MainImage;
 
 protected:
+    ttstr _evictedImageName;
+    tjs_uint32 _evictedColorKey = 0;
+    bool _bitmapEvicted = false;
+    void EnsureBitmap();
     bool CanHaveImage; // whether the layer can have image
     tTVPBaseBitmap *ProvinceImage;
     tjs_uint32 NeutralColor; // Neutral Color (which can be set by the user)
@@ -474,6 +480,7 @@ private:
     void ImageLayerSizeChanged(); // called from geographical management
 public:
     tTVPBaseTexture *GetMainImage() {
+        if(_bitmapEvicted) EnsureBitmap();
         ApplyFont();
         return MainImage;
     }
@@ -495,9 +502,9 @@ public:
 
     void LoadProvinceImage(const ttstr &name);
 
-    tjs_uint32 GetMainPixel(tjs_int x, tjs_int y) const;
+    tjs_uint32 GetMainPixel(tjs_int x, tjs_int y);
     void SetMainPixel(tjs_int x, tjs_int y, tjs_uint32 color);
-    tjs_int GetMaskPixel(tjs_int x, tjs_int y) const;
+    tjs_int GetMaskPixel(tjs_int x, tjs_int y);
     void SetMaskPixel(tjs_int x, tjs_int y, tjs_int mask);
     tjs_int GetProvincePixel(tjs_int x, tjs_int y) const;
     void SetProvincePixel(tjs_int x, tjs_int y, tjs_int n);

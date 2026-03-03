@@ -14,6 +14,7 @@
 
 #include "tjsCommHead.h"
 
+#include <atomic>
 #include <cmath>
 #include <cstdlib>
 #include <cmath>
@@ -62,9 +63,20 @@ extern tjs_int TVPGetCursor(const ttstr &name);
 // global flags
 //---------------------------------------------------------------------------
 bool TVPFreeUnusedLayerCache = false;
-// set true to free unused layer cache bitmap
-// (layer cache is not freed until system compact event if this is
-// false)
+
+static std::atomic<tjs_int> TVPLayerInstanceCount{0};
+static std::atomic<int64_t> TVPLayerBitmapTotalBytes{0};
+
+tjs_int TVPGetLayerCount() { return TVPLayerInstanceCount.load(std::memory_order_relaxed); }
+tjs_uint64 TVPGetLayerTotalBitmapBytes() {
+    auto v = TVPLayerBitmapTotalBytes.load(std::memory_order_relaxed);
+    return v > 0 ? static_cast<tjs_uint64>(v) : 0;
+}
+
+static int64_t TVPCalcMainImageBytes(tTVPBaseTexture *img) {
+    if(!img) return 0;
+    return static_cast<int64_t>(img->GetWidth()) * img->GetHeight() * (img->GetBPP() / 8);
+}
 //---------------------------------------------------------------------------
 
 static bool IsGPU() {
@@ -178,7 +190,7 @@ private:
         // OnCompact method from tTVPCompactEventCallbackIntf
         // called when the application is idle, deactivated,
         // minimized, or etc...
-        if(level >= TVP_COMPACT_LEVEL_DEACTIVATE)
+        if(level >= TVP_COMPACT_LEVEL_IDLE)
             CompactTempBitmap();
     }
 
@@ -302,6 +314,7 @@ bool TVPDefaultHoldAlpha = false;
 // object lifetime stuff
 //---------------------------------------------------------------------------
 tTJSNI_BaseLayer::tTJSNI_BaseLayer() {
+    TVPLayerInstanceCount.fetch_add(1, std::memory_order_relaxed);
     // creates bitmap holder
     tTVPTempBitmapHolder::AddRef();
 
@@ -410,7 +423,10 @@ tTJSNI_BaseLayer::tTJSNI_BaseLayer() {
 }
 
 //---------------------------------------------------------------------------
-tTJSNI_BaseLayer::~tTJSNI_BaseLayer() { tTVPTempBitmapHolder::Release(); }
+tTJSNI_BaseLayer::~tTJSNI_BaseLayer() {
+    TVPLayerInstanceCount.fetch_sub(1, std::memory_order_relaxed);
+    tTVPTempBitmapHolder::Release();
+}
 
 //---------------------------------------------------------------------------
 tjs_error tTJSNI_BaseLayer::Construct(tjs_int numparams, tTJSVariant **param,
@@ -555,9 +571,13 @@ void tTJSNI_BaseLayer::RegisterCompactEventHook() {
 
 //---------------------------------------------------------------------------
 void tTJSNI_BaseLayer::OnCompact(tjs_int level) {
-    // method from tTVPCompactEventCallbackIntf
-    if(level >= TVP_COMPACT_LEVEL_DEACTIVATE)
+    if(level >= TVP_COMPACT_LEVEL_IDLE)
         CompactCache();
+    if(MainImage) {
+        if(level >= TVP_COMPACT_LEVEL_MINIMIZE) {
+            MainImage->CompactGPUCache();
+        }
+    }
 }
 //---------------------------------------------------------------------------
 
@@ -1151,6 +1171,8 @@ void tTJSNI_BaseLayer::SetVisible(bool st) {
     if(Visible != st) {
         if(IsPrimary() && !st)
             TVPThrowExceptionMessage(TVPCannotSetPrimaryInvisible);
+        if(st && _bitmapEvicted)
+            EnsureBitmap();
         if(!st)
             Update();
         Visible = st;
@@ -1173,6 +1195,8 @@ void tTJSNI_BaseLayer::SetOpacity(tjs_int opa) {
     if(Opacity != opa) {
         if(IsPrimary() && opa != 255)
             TVPThrowExceptionMessage(TVPCannotSetPrimaryInvisible);
+        if(opa != 0 && Visible && _bitmapEvicted)
+            EnsureBitmap();
         Opacity = opa;
         if(Parent)
             Parent->NotifyChildrenVisualStateChanged();
@@ -2276,8 +2300,11 @@ void tTJSNI_BaseLayer::ChangeImageSize(tjs_uint width, tjs_uint height) {
     if(!width || !height)
         TVPThrowExceptionMessage(TVPCannotCreateEmptyLayerImage);
 
+    int64_t oldBytes = TVPCalcMainImageBytes(MainImage);
     if(MainImage)
         MainImage->SetSizeWithFill(width, height, NeutralColor);
+    TVPLayerBitmapTotalBytes.fetch_add(TVPCalcMainImageBytes(MainImage) - oldBytes,
+                                       std::memory_order_relaxed);
     if(ProvinceImage)
         ProvinceImage->SetSizeWithFill(width, height, 0);
 
@@ -2298,6 +2325,8 @@ void tTJSNI_BaseLayer::AllocateImage() {
         MainImage->Fill(tTVPRect(0, 0, Rect.get_width(), Rect.get_height()),
                         NeutralColor);
         MainImage->SetFont(Font); // set font
+        TVPLayerBitmapTotalBytes.fetch_add(TVPCalcMainImageBytes(MainImage),
+                                           std::memory_order_relaxed);
     }
 
     if(MainImage)
@@ -2314,12 +2343,27 @@ void tTJSNI_BaseLayer::AllocateImage() {
 
 //---------------------------------------------------------------------------
 void tTJSNI_BaseLayer::DeallocateImage() {
-    if(MainImage)
-        delete MainImage, MainImage = nullptr;
+    if(MainImage) {
+        TVPLayerBitmapTotalBytes.fetch_sub(TVPCalcMainImageBytes(MainImage),
+                                           std::memory_order_relaxed);
+        delete MainImage;
+        MainImage = nullptr;
+    }
     if(ProvinceImage)
         delete ProvinceImage, ProvinceImage = nullptr;
 
     ImageModified = true;
+}
+
+//---------------------------------------------------------------------------
+void tTJSNI_BaseLayer::EnsureBitmap() {
+    if(!_bitmapEvicted) return;
+    AllocateImage();
+    if(!_evictedImageName.IsEmpty() && MainImage) {
+        TVPLoadGraphic(MainImage, _evictedImageName, _evictedColorKey,
+                       0, 0, glmNormal, nullptr, nullptr);
+    }
+    _bitmapEvicted = false;
 }
 
 //---------------------------------------------------------------------------
@@ -2346,10 +2390,13 @@ void tTJSNI_BaseLayer::DeallocateProvinceImage() {
 
 //---------------------------------------------------------------------------
 void tTJSNI_BaseLayer::AllocateDefaultImage() {
+    int64_t oldBytes = TVPCalcMainImageBytes(MainImage);
     if(!MainImage)
         MainImage = new tTVPBaseTexture(*TVPTempBitmapHolder->Get());
     else
         MainImage->Assign(*TVPTempBitmapHolder->Get());
+    TVPLayerBitmapTotalBytes.fetch_add(TVPCalcMainImageBytes(MainImage) - oldBytes,
+                                       std::memory_order_relaxed);
 
     FontChanged = true; // invalidate font assignment cache
     ResetClip(); // cliprect is reset
@@ -2363,10 +2410,13 @@ void tTJSNI_BaseLayer::AssignImages(tTJSNI_BaseLayer *src) {
     bool main_changed = true;
 
     if(src->MainImage) {
+        int64_t oldBytes = TVPCalcMainImageBytes(MainImage);
         if(MainImage)
             main_changed = MainImage->Assign(*src->MainImage);
         else
             MainImage = new tTVPBaseTexture(*src->MainImage);
+        TVPLayerBitmapTotalBytes.fetch_add(TVPCalcMainImageBytes(MainImage) - oldBytes,
+                                           std::memory_order_relaxed);
         FontChanged = true; // invalidate font assignment cache
     } else {
         DeallocateImage();
@@ -2401,10 +2451,13 @@ void tTJSNI_BaseLayer::AssignMainImageWithUpdate(iTVPBaseBitmap *bmp) {
     bool main_changed = true;
 
     if(bmp) {
+        int64_t oldBytes = TVPCalcMainImageBytes(MainImage);
         if(MainImage)
             main_changed = MainImage->Assign(*bmp);
         else
             MainImage = new tTVPBaseTexture(*bmp);
+        TVPLayerBitmapTotalBytes.fetch_add(TVPCalcMainImageBytes(MainImage) - oldBytes,
+                                           std::memory_order_relaxed);
         FontChanged = true; // invalidate font assignment cache
     } else {
         DeallocateImage();
@@ -2447,6 +2500,7 @@ void tTJSNI_BaseLayer::AssignMainImage(iTVPBaseBitmap *bmp) {
 
 //---------------------------------------------------------------------------
 void tTJSNI_BaseLayer::CopyFromMainImage(tTJSNI_Bitmap *bmp) {
+    if(!MainImage && _bitmapEvicted) EnsureBitmap();
     if(!MainImage)
         TVPThrowExceptionMessage(TVPNotDrawableLayerType);
     bmp->CopyFrom(MainImage);
@@ -2469,6 +2523,7 @@ bool tTJSNI_BaseLayer::GetHasImage() const { return MainImage != nullptr; }
 
 //---------------------------------------------------------------------------
 void tTJSNI_BaseLayer::SetImageLeft(tjs_int left) {
+    if(!MainImage && _bitmapEvicted) EnsureBitmap();
     if(!MainImage)
         TVPThrowExceptionMessage(TVPNotDrawableLayerType);
     if(ImageLeft != left) {
@@ -2483,13 +2538,14 @@ void tTJSNI_BaseLayer::SetImageLeft(tjs_int left) {
 
 //---------------------------------------------------------------------------
 tjs_int tTJSNI_BaseLayer::GetImageLeft() const {
-    if(!MainImage)
+    if(!MainImage && !_bitmapEvicted)
         TVPThrowExceptionMessage(TVPNotDrawableLayerType);
     return ImageLeft;
 }
 
 //---------------------------------------------------------------------------
 void tTJSNI_BaseLayer::SetImageTop(tjs_int top) {
+    if(!MainImage && _bitmapEvicted) EnsureBitmap();
     if(!MainImage)
         TVPThrowExceptionMessage(TVPNotDrawableLayerType);
     if(ImageTop != top) {
@@ -2504,13 +2560,14 @@ void tTJSNI_BaseLayer::SetImageTop(tjs_int top) {
 
 //---------------------------------------------------------------------------
 tjs_int tTJSNI_BaseLayer::GetImageTop() const {
-    if(!MainImage)
+    if(!MainImage && !_bitmapEvicted)
         TVPThrowExceptionMessage(TVPNotDrawableLayerType);
     return ImageTop;
 }
 
 //---------------------------------------------------------------------------
 void tTJSNI_BaseLayer::SetImagePosition(tjs_int left, tjs_int top) {
+    if(!MainImage && _bitmapEvicted) EnsureBitmap();
     if(!MainImage)
         TVPThrowExceptionMessage(TVPNotDrawableLayerType);
     if(ImageLeft != left || ImageTop != top) {
@@ -2530,6 +2587,7 @@ void tTJSNI_BaseLayer::SetImagePosition(tjs_int left, tjs_int top) {
 
 //---------------------------------------------------------------------------
 void tTJSNI_BaseLayer::SetImageWidth(tjs_uint width) {
+    if(!MainImage && _bitmapEvicted) EnsureBitmap();
     if(!MainImage)
         TVPThrowExceptionMessage(TVPNotDrawableLayerType);
 
@@ -2552,13 +2610,16 @@ void tTJSNI_BaseLayer::SetImageWidth(tjs_uint width) {
 
 //---------------------------------------------------------------------------
 tjs_uint tTJSNI_BaseLayer::GetImageWidth() const {
-    if(!MainImage)
+    if(!MainImage) {
+        if(_bitmapEvicted) return Rect.get_width();
         TVPThrowExceptionMessage(TVPNotDrawableLayerType);
+    }
     return MainImage->GetWidth();
 }
 
 //---------------------------------------------------------------------------
 void tTJSNI_BaseLayer::SetImageHeight(tjs_uint height) {
+    if(!MainImage && _bitmapEvicted) EnsureBitmap();
     if(!MainImage)
         TVPThrowExceptionMessage(TVPNotDrawableLayerType);
 
@@ -2581,8 +2642,10 @@ void tTJSNI_BaseLayer::SetImageHeight(tjs_uint height) {
 
 //---------------------------------------------------------------------------
 tjs_uint tTJSNI_BaseLayer::GetImageHeight() const {
-    if(!MainImage)
+    if(!MainImage) {
+        if(_bitmapEvicted) return Rect.get_height();
         TVPThrowExceptionMessage(TVPNotDrawableLayerType);
+    }
     return MainImage->GetHeight();
 }
 
@@ -2610,6 +2673,7 @@ void tTJSNI_BaseLayer::InternalSetImageSize(tjs_uint width, tjs_uint height) {
 
 //---------------------------------------------------------------------------
 void tTJSNI_BaseLayer::SetImageSize(tjs_uint width, tjs_uint height) {
+    if(!MainImage && _bitmapEvicted) EnsureBitmap();
     if(!MainImage)
         TVPThrowExceptionMessage(TVPNotDrawableLayerType);
 
@@ -2664,6 +2728,7 @@ void tTJSNI_BaseLayer::IndependProvinceImage(bool copy) {
 
 //---------------------------------------------------------------------------
 void tTJSNI_BaseLayer::SaveLayerImage(const ttstr &name, const ttstr &type) {
+    if(!MainImage && _bitmapEvicted) EnsureBitmap();
     if(!MainImage)
         TVPThrowExceptionMessage(TVPNotDrawableLayerType);
 
@@ -2777,9 +2842,13 @@ void tTJSNI_BaseLayer::SaveLayerImage(const ttstr &name, const ttstr &type) {
 
 //---------------------------------------------------------------------------
 void tTJSNI_BaseLayer::AssignTexture(iTVPTexture2D *tex) {
+    if(!MainImage && _bitmapEvicted) EnsureBitmap();
     if(!MainImage)
         TVPThrowExceptionMessage(TVPNotDrawableLayerType);
+    int64_t oldBytes = TVPCalcMainImageBytes(MainImage);
     MainImage->AssignTexture(tex);
+    TVPLayerBitmapTotalBytes.fetch_add(TVPCalcMainImageBytes(MainImage) - oldBytes,
+                                       std::memory_order_relaxed);
     InternalSetImageSize(MainImage->GetWidth(), MainImage->GetHeight());
     ImageModified = true;
     ResetClip(); // cliprect is reset
@@ -2808,14 +2877,25 @@ iTJSDispatch2 *tTJSNI_BaseLayer::LoadImages(const ttstr &name,
     //                          alpha blending.
     // returns graphic image metainfo.
 
+    if(_bitmapEvicted) {
+        AllocateImage();
+        _bitmapEvicted = false;
+    }
+
     if(!MainImage)
         TVPThrowExceptionMessage(TVPNotDrawableLayerType);
 
     ttstr provincename;
     iTJSDispatch2 *metainfo = nullptr;
 
+    int64_t oldBytes = TVPCalcMainImageBytes(MainImage);
     TVPLoadGraphic(MainImage, name, colorkey, 0, 0, glmNormal, &provincename,
                    &metainfo);
+    TVPLayerBitmapTotalBytes.fetch_add(TVPCalcMainImageBytes(MainImage) - oldBytes,
+                                       std::memory_order_relaxed);
+
+    _evictedImageName = name;
+    _evictedColorKey = colorkey;
     try {
 
         InternalSetImageSize(MainImage->GetWidth(), MainImage->GetHeight());
@@ -2881,7 +2961,8 @@ void tTJSNI_BaseLayer::LoadProvinceImage(const ttstr &name) {
 }
 
 //---------------------------------------------------------------------------
-tjs_uint32 tTJSNI_BaseLayer::GetMainPixel(tjs_int x, tjs_int y) const {
+tjs_uint32 tTJSNI_BaseLayer::GetMainPixel(tjs_int x, tjs_int y) {
+    if(!MainImage && _bitmapEvicted) EnsureBitmap();
     if(!MainImage)
         TVPThrowExceptionMessage(TVPNotDrawableLayerType);
 
@@ -2890,6 +2971,7 @@ tjs_uint32 tTJSNI_BaseLayer::GetMainPixel(tjs_int x, tjs_int y) const {
 
 //---------------------------------------------------------------------------
 void tTJSNI_BaseLayer::SetMainPixel(tjs_int x, tjs_int y, tjs_uint32 color) {
+    if(!MainImage && _bitmapEvicted) EnsureBitmap();
     if(!MainImage)
         TVPThrowExceptionMessage(TVPNotDrawableLayerType);
 
@@ -2909,7 +2991,8 @@ void tTJSNI_BaseLayer::SetMainPixel(tjs_int x, tjs_int y, tjs_uint32 color) {
 }
 
 //---------------------------------------------------------------------------
-tjs_int tTJSNI_BaseLayer::GetMaskPixel(tjs_int x, tjs_int y) const {
+tjs_int tTJSNI_BaseLayer::GetMaskPixel(tjs_int x, tjs_int y) {
+    if(!MainImage && _bitmapEvicted) EnsureBitmap();
     if(!MainImage)
         TVPThrowExceptionMessage(TVPNotDrawableLayerType);
 
@@ -2918,6 +3001,7 @@ tjs_int tTJSNI_BaseLayer::GetMaskPixel(tjs_int x, tjs_int y) const {
 
 //---------------------------------------------------------------------------
 void tTJSNI_BaseLayer::SetMaskPixel(tjs_int x, tjs_int y, tjs_int mask) {
+    if(!MainImage && _bitmapEvicted) EnsureBitmap();
     if(!MainImage)
         TVPThrowExceptionMessage(TVPNotDrawableLayerType);
 
@@ -7385,12 +7469,15 @@ tTVPBaseTexture *tTJSNI_BaseLayer::Complete(const tTVPRect &rect) {
 
     // complete given rectangle of cache.
 
+    if(!MainImage && _bitmapEvicted)
+        EnsureBitmap();
+
     if(!GetCacheEnabled())
         return nullptr;
     // caller must ensure that the caching is enabled
 
-    if(GetVisibleChildrenCount() == 0 && ImageLeft == 0 && ImageTop == 0 &&
-       MainImage->GetWidth() == GetWidth() &&
+    if(MainImage && GetVisibleChildrenCount() == 0 && ImageLeft == 0 &&
+       ImageTop == 0 && MainImage->GetWidth() == GetWidth() &&
        MainImage->GetHeight() == GetHeight()) {
         // the layer has no visible children
         // and entire of the bitmap is the visible area.

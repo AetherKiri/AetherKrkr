@@ -233,10 +233,9 @@ void TVPClearFontCache() { TVPFontCache.Clear(); }
 //---------------------------------------------------------------------------
 struct tTVPClearFontCacheCallback : public tTVPCompactEventCallbackIntf {
     void OnCompact(tjs_int level) override {
-        if(level >= TVP_COMPACT_LEVEL_MINIMIZE) {
-            // clear the font cache on application minimize
-            TVPClearFontCache();
-        }
+        // Font cache has built-in LRU eviction via tTJSHashCache.
+        // Aggressive clearing causes repeated glyph rasterization
+        // and heap fragmentation under memory pressure.
     }
 } static TVPClearFontCacheCallback;
 static bool TVPClearFontCacheCallbackInit = false;
@@ -682,6 +681,10 @@ void tTVPNativeBaseBitmap::Recreate(tjs_uint w, tjs_uint h, tjs_uint bpp) {
 
 bool tTVPNativeBaseBitmap::IsIndependent() const {
     return Bitmap->IsIndependent() && !Bitmap->IsStatic();
+}
+//---------------------------------------------------------------------------
+void tTVPNativeBaseBitmap::CompactGPUCache() {
+    if(Bitmap) Bitmap->CompactGPUCache();
 }
 #if 0
 //---------------------------------------------------------------------------
