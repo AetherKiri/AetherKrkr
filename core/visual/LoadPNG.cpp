@@ -14,6 +14,9 @@
 #include "DebugIntf.h"
 #include "tjsDictionary.h"
 #include "ScriptMgnIntf.h"
+#include "TVPDecodeArena.h"
+
+#include "TVPMmapAlloc.h"
 
 bool TVPAcceptSaveAsPNG(void *formatdata, const ttstr &type,
                         class iTJSDispatch2 **dic) {
@@ -67,11 +70,18 @@ struct PNG_read_chunk_callback_user_struct {
 //---------------------------------------------------------------------------
 // user_malloc_fn
 static png_voidp PNG_malloc(png_structp ps, png_size_t size) {
+    if(TVPDecodeArenaActive()) {
+        void *p = TVPDecodeArenaAlloc(size);
+        if(p) return p;
+    }
     return malloc(size);
 }
 //---------------------------------------------------------------------------
 // user_free_fn
-static void PNG_free(png_structp ps, void * /* png_structp*/ mem) { free(mem); }
+static void PNG_free(png_structp ps, void * /* png_structp*/ mem) {
+    if(TVPDecodeArenaActive()) return;
+    free(mem);
+}
 //---------------------------------------------------------------------------
 // user_error_fn
 static void PNG_error(png_structp ps, png_const_charp msg) {
@@ -166,6 +176,9 @@ void TVPLoadPNG(void *formatdata, void *callbackdata,
 
     png_bytep *row_pointers = nullptr;
     tjs_uint8 *image = nullptr;
+#if defined(__APPLE__) || defined(__linux__) || defined(__ANDROID__)
+    bool image_is_mmap = false;
+#endif
 
     try {
         // create png_struct
@@ -421,7 +434,12 @@ void TVPLoadPNG(void *formatdata, void *callbackdata,
 
             row_pointers = new png_bytep[height];
             png_size_t rowbytes = png_get_rowbytes(png_ptr, info_ptr);
+#if defined(__APPLE__) || defined(__linux__) || defined(__ANDROID__)
+            image = (tjs_uint8 *)TVPMmapAlloc(rowbytes * height);
+            image_is_mmap = true;
+#else
             image = new tjs_uint8[rowbytes * height];
+#endif
             for(i = 0; i < height; i++) {
                 row_pointers[i] = image + i * rowbytes;
             }
@@ -451,16 +469,28 @@ void TVPLoadPNG(void *formatdata, void *callbackdata,
         png_destroy_read_struct(&png_ptr, &info_ptr, &end_info);
         if(row_pointers)
             delete[] row_pointers;
-        if(image)
-            delete[] image;
+        if(image) {
+#if defined(__APPLE__) || defined(__linux__) || defined(__ANDROID__)
+            if(image_is_mmap)
+                TVPMmapFree(image);
+            else
+#endif
+                delete[] image;
+        }
         throw;
     }
 
     png_destroy_read_struct(&png_ptr, &info_ptr, &end_info);
     if(row_pointers)
         delete[] row_pointers;
-    if(image)
-        delete[] image;
+    if(image) {
+#if defined(__APPLE__) || defined(__linux__) || defined(__ANDROID__)
+        if(image_is_mmap)
+            TVPMmapFree(image);
+        else
+#endif
+            delete[] image;
+    }
 }
 //---------------------------------------------------------------------------
 /**

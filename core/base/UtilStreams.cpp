@@ -13,6 +13,11 @@
 #include "UtilStreams.h"
 #include "MsgIntf.h"
 #include "DebugIntf.h"
+
+#include "TVPMmapAlloc.h"
+#ifdef TVP_USE_MMAP_TEMP
+static constexpr size_t kStreamMmapThreshold = 256 * 1024;
+#endif
 #include "EventIntf.h"
 #include "StorageIntf.h"
 #include <thread>
@@ -244,18 +249,53 @@ void tTVPMemoryStream::Init() {
     Size = 0;
     AllocSize = 0;
     CurrentPos = 0;
+    UseMmap = false;
 }
 
 //---------------------------------------------------------------------------
-void *tTVPMemoryStream::Alloc(size_t size) { return TJS_malloc(size); }
+void *tTVPMemoryStream::Alloc(size_t size) {
+#if defined(__APPLE__) || defined(__linux__) || defined(__ANDROID__)
+    if(size >= kStreamMmapThreshold) {
+        void *p = TVPMmapAlloc(size);
+        if(p) { UseMmap = true; return p; }
+    }
+#endif
+    UseMmap = false;
+    return TJS_malloc(size);
+}
 
 //---------------------------------------------------------------------------
 void *tTVPMemoryStream::Realloc(void *orgblock, size_t size) {
+#if defined(__APPLE__) || defined(__linux__) || defined(__ANDROID__)
+    if(UseMmap) {
+        void *newblock = TVPMmapAlloc(size);
+        if(!newblock) return nullptr;
+        if(orgblock) {
+            size_t copySize = (AllocSize < size) ? AllocSize : size;
+            memcpy(newblock, orgblock, copySize);
+            TVPMmapFree(orgblock);
+        }
+        return newblock;
+    }
+    if(size >= kStreamMmapThreshold && !orgblock) {
+        void *p = TVPMmapAlloc(size);
+        if(p) { UseMmap = true; return p; }
+    }
+#endif
     return TJS_realloc(orgblock, size);
 }
 
 //---------------------------------------------------------------------------
-void tTVPMemoryStream::Free(void *block) { TJS_free(block); }
+void tTVPMemoryStream::Free(void *block) {
+#if defined(__APPLE__) || defined(__linux__) || defined(__ANDROID__)
+    if(UseMmap) {
+        TVPMmapFree(block);
+        UseMmap = false;
+        return;
+    }
+#endif
+    TJS_free(block);
+}
 //---------------------------------------------------------------------------
 
 //---------------------------------------------------------------------------

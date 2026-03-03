@@ -7,12 +7,23 @@
 #include "EventIntf.h"
 #include "DebugIntf.h"
 
+#include "TVPMmapAlloc.h"
+
 class BasicAllocator : public iTVPMemoryAllocator {
 public:
     BasicAllocator() { TVPAddLog(TJS_W("(info) Use malloc for Bitmap")); }
     void *allocate(size_t size) override { return malloc(size); }
     void free(void *mem) override { ::free(mem); }
 };
+
+#ifdef TVP_USE_MMAP_TEMP
+class MmapAllocator : public iTVPMemoryAllocator {
+public:
+    MmapAllocator() { TVPAddLog(TJS_W("(info) Use mmap for Bitmap")); }
+    void *allocate(size_t size) override { return TVPMmapAlloc(size); }
+    void free(void *mem) override { TVPMmapFree(mem); }
+};
+#endif
 #if 0
 class GlobalAllocAllocator : public iTVPMemoryAllocator
 {
@@ -113,7 +124,11 @@ void tTVPBitmapBitsAlloc::InitializeAllocator() {
 				Allocator = new HeapAllocAllocator();
 			else    // malloc
 #endif
+#ifdef TVP_USE_MMAP_TEMP
+        Allocator = new MmapAllocator();
+#else
         Allocator = new BasicAllocator();
+#endif
 #if 0
 		} else {
 			Allocator = new GlobalAllocAllocator();

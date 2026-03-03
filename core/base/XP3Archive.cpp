@@ -21,6 +21,8 @@
 #include <zlib.h>
 #include <algorithm>
 
+#include "TVPMmapAlloc.h"
+
 bool TVPAllowExtractProtectedStorage = true;
 
 //---------------------------------------------------------------------------
@@ -677,18 +679,30 @@ public:
     }
 
     ~tTVPSegmentData() {
-        if(Data)
+        if(Data) {
+#ifdef TVP_USE_MMAP_TEMP
+            TVPMmapFree(Data);
+#else
             delete[] Data;
+#endif
+        }
     }
 
     void SetData(unsigned long outsize, tTJSBinaryStream *instream,
                  unsigned long insize) {
-        // uncompress data
+#ifdef TVP_USE_MMAP_TEMP
+        tjs_uint8 *indata = (tjs_uint8 *)TVPMmapAlloc(insize);
+#else
         tjs_uint8 *indata = new tjs_uint8[insize];
+#endif
         try {
             instream->Read(indata, insize);
 
+#ifdef TVP_USE_MMAP_TEMP
+            Data = (tjs_uint8 *)TVPMmapAlloc(outsize);
+#else
             Data = new tjs_uint8[outsize];
+#endif
             unsigned long destlen = outsize;
             int result = uncompress((unsigned char *)Data, &outsize,
                                     (unsigned char *)indata, insize);
@@ -696,10 +710,18 @@ public:
                 TVPThrowExceptionMessage(TVPUncompressionFailed);
             Size = outsize;
         } catch(...) {
+#ifdef TVP_USE_MMAP_TEMP
+            TVPMmapFree(indata);
+#else
             delete[] indata;
+#endif
             throw;
         }
+#ifdef TVP_USE_MMAP_TEMP
+        TVPMmapFree(indata);
+#else
         delete[] indata;
+#endif
     }
 
     const tjs_uint8 *GetData() const { return Data; }
@@ -752,6 +774,11 @@ void TVPClearXP3SegmentCache() {
 
     TVPSegmentCache.Clear();
     TVPSegmentCacheTotalBytes = 0;
+}
+
+tjs_uint TVPGetXP3SegmentCacheTotalBytes() {
+    tTJSCriticalSectionHolder cs_holder(TVPSegmentCacheCS);
+    return TVPSegmentCacheTotalBytes;
 }
 
 //---------------------------------------------------------------------------

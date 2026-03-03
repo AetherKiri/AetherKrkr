@@ -85,6 +85,7 @@ protected:
     tjs_uint Size;
     tjs_uint AllocSize;
     tjs_uint CurrentPos;
+    bool UseMmap = false;
 
 public:
     tTVPMemoryStream();

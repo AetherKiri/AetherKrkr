@@ -7,6 +7,11 @@
 #include "EMoteCTX.h"
 #include "ncbind.hpp"
 
+#include "TVPMmapAlloc.h"
+#ifdef TVP_USE_MMAP_TEMP
+static constexpr size_t kPSBMmapThreshold = 256 * 1024;
+#endif
+
 #define LOGGER spdlog::get("plugin")
 
 namespace PSB {
@@ -356,9 +361,29 @@ namespace PSB {
             return false;
         }
 
-        auto *fileData = new uint8_t[readSize];
+        bool fileDataMmap = false;
+        uint8_t *fileData = nullptr;
+#if defined(__APPLE__) || defined(__linux__) || defined(__ANDROID__)
+        if(readSize >= kPSBMmapThreshold) {
+            fileData = (uint8_t *)TVPMmapAlloc(readSize);
+            fileDataMmap = true;
+        }
+#endif
+        if(!fileData)
+            fileData = new uint8_t[readSize];
         s->Read(fileData, readSize);
         delete s;
+
+        auto freeFileData = [&]() {
+            if(fileDataMmap) {
+#if defined(__APPLE__) || defined(__linux__) || defined(__ANDROID__)
+                TVPMmapFree(fileData);
+#endif
+            } else {
+                delete[] fileData;
+            }
+            fileData = nullptr;
+        };
 
         char sign[4];
         memcpy(sign, fileData, 4);
@@ -372,7 +397,7 @@ namespace PSB {
            std::strcmp(sign, PsbSignature) != 0 &&
            std::strcmp(sign, MflSignature) != 0) {
             LOGGER->warn("Not a PSB/MDF/MFL file: {}", filePath.AsStdString());
-            delete[] fileData;
+            freeFileData();
             return false;
         }
 
@@ -392,7 +417,7 @@ namespace PSB {
             int zResult = uncompress(
                 static_cast<Bytef *>(stream.GetInternalBuffer()), &destLen,
                 fileData + 8, static_cast<uLong>(readSize - 8));
-            delete[] fileData;
+            freeFileData();
 
             if(zResult != Z_OK) {
                 LOGGER->warn("MDF decompression failed: zlib error {} ({})",
@@ -403,7 +428,7 @@ namespace PSB {
                           readSize, destLen, filePath.AsStdString());
         } else {
             memcpy(stream.GetInternalBuffer(), fileData, readSize);
-            delete[] fileData;
+            freeFileData();
         }
 
         stream.SetPosition(0);
