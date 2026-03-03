@@ -13,6 +13,7 @@
 #include "UtilStreams.h"
 #include "BitmapBitsAlloc.h"
 #include "LayerIntf.h"
+#include "TVPDecodeArena.h"
 
 tTVPTmpBitmapImage::tTVPTmpBitmapImage() : MetaInfo(nullptr) {}
 tTVPTmpBitmapImage::~tTVPTmpBitmapImage() {
@@ -308,13 +309,21 @@ void tTVPAsyncImageLoader::LoadImageFromCommand(tTVPImageLoadCommand *cmd) {
     if(handler) {
         try {
             tTVPStreamHolder holder(name);
+#if defined(__APPLE__) || defined(__linux__) || defined(__ANDROID__)
+            TVPDecodeArena::Instance().Begin();
+#endif
             handler->Load(handler->FormatData, (void *)cmd->dest_,
                           TVPLoadGraphicAsync_SizeCallback,
                           TVPLoadGraphicAsync_ScanLineCallback,
                           TVPLoadGraphicAsync_MetaInfoPushCallback,
                           holder.Get(), -1, glmNormal);
+#if defined(__APPLE__) || defined(__linux__) || defined(__ANDROID__)
+            TVPDecodeArena::Instance().End();
+#endif
         } catch(...) {
-            // 例外は全てキャッチ
+#if defined(__APPLE__) || defined(__linux__) || defined(__ANDROID__)
+            TVPDecodeArena::Instance().End();
+#endif
             cmd->result_ = TVPFormatMessage(TVPImageLoadError, cmd->path_);
         }
     } else {

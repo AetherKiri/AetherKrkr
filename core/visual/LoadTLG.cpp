@@ -15,8 +15,22 @@
 #include "tjsUtils.h"
 #include "tvpgl.h"
 #include "tjsDictionary.h"
+#include "TVPDecodeArena.h"
 
 #include <stdlib.h>
+
+static inline void *TLGArenaAlloc(size_t size, int align) {
+    if(TVPDecodeArenaActive()) {
+        void *p = TVPDecodeArenaAlloc(size + align + 16);
+        if(p) return p;
+    }
+    return TJSAlignedAlloc(size, align);
+}
+
+static inline void TLGArenaDealloc(void *ptr) {
+    if(TVPDecodeArenaActive()) return;
+    TJSAlignedDealloc(ptr);
+}
 
 /*
         TLG5:
@@ -77,13 +91,13 @@ void TVPLoadTLG5(void *formatdata, void *callbackdata,
         outbuf[i] = nullptr;
 
     try {
-        text = (tjs_uint8 *)TJSAlignedAlloc(4096 + 32, 4) + 16;
+        text = (tjs_uint8 *)TLGArenaAlloc(4096 + 32, 4) + 16;
         memset(text, 0, 4096);
 
-        inbuf = (tjs_uint8 *)TJSAlignedAlloc(blockheight * width + 10 + 16, 4);
+        inbuf = (tjs_uint8 *)TLGArenaAlloc(blockheight * width + 10 + 16, 4);
         for(tjs_int i = 0; i < colors; i++)
             outbuf[i] =
-                (tjs_uint8 *)TJSAlignedAlloc(blockheight * width + 10 + 16, 4);
+                (tjs_uint8 *)TLGArenaAlloc(blockheight * width + 10 + 16, 4);
 
         tjs_uint8 *prevline = nullptr;
         for(tjs_int y_blk = 0; y_blk < height; y_blk += blockheight) {
@@ -180,21 +194,21 @@ void TVPLoadTLG5(void *formatdata, void *callbackdata,
         }
     } catch(...) {
         if(inbuf)
-            TJSAlignedDealloc(inbuf);
+            TLGArenaDealloc(inbuf);
         if(text)
-            TJSAlignedDealloc(text - 16);
+            TLGArenaDealloc(text - 16);
         for(tjs_int i = 0; i < colors; i++)
             if(outbuf[i])
-                TJSAlignedDealloc(outbuf[i]);
+                TLGArenaDealloc(outbuf[i]);
         throw;
     }
     if(inbuf)
-        TJSAlignedDealloc(inbuf);
+        TLGArenaDealloc(inbuf);
     if(text)
-        TJSAlignedDealloc(text - 16);
+        TLGArenaDealloc(text - 16);
     for(tjs_int i = 0; i < colors; i++)
         if(outbuf[i])
-            TJSAlignedDealloc(outbuf[i]);
+            TLGArenaDealloc(outbuf[i]);
 }
 //---------------------------------------------------------------------------
 
@@ -264,13 +278,13 @@ void TVPLoadTLG6(void *formatdata, void *callbackdata,
     tjs_uint8 *grayline;
     try {
         // allocate memories
-        bit_pool = (tjs_uint8 *)TJSAlignedAlloc(max_bit_length / 8 + 5, 4);
-        pixelbuf = (tjs_uint32 *)TJSAlignedAlloc(
+        bit_pool = (tjs_uint8 *)TLGArenaAlloc(max_bit_length / 8 + 5, 4);
+        pixelbuf = (tjs_uint32 *)TLGArenaAlloc(
             sizeof(tjs_uint32) * width * TVP_TLG6_H_BLOCK_SIZE + 1, 4);
         filter_types =
-            (tjs_uint8 *)TJSAlignedAlloc(x_block_count * y_block_count + 16, 4);
-        zeroline = (tjs_uint32 *)TJSAlignedAlloc(width * sizeof(tjs_uint32), 4);
-        LZSS_text = (tjs_uint8 *)TJSAlignedAlloc(4096 + 32, 4) + 16;
+            (tjs_uint8 *)TLGArenaAlloc(x_block_count * y_block_count + 16, 4);
+        zeroline = (tjs_uint32 *)TLGArenaAlloc(width * sizeof(tjs_uint32), 4);
+        LZSS_text = (tjs_uint8 *)TLGArenaAlloc(4096 + 32, 4) + 16;
 
         // initialize zero line (virtual y=-1 line)
         TVPFillARGB(zeroline, width, colors == 3 ? 0xff000000 : 0x00000000);
@@ -290,16 +304,16 @@ void TVPLoadTLG6(void *formatdata, void *callbackdata,
         // TLG5.
         {
             tjs_int inbuf_size = src->ReadI32LE();
-            tjs_uint8 *inbuf = (tjs_uint8 *)TJSAlignedAlloc(inbuf_size + 16, 4);
+            tjs_uint8 *inbuf = (tjs_uint8 *)TLGArenaAlloc(inbuf_size + 16, 4);
             try {
                 src->ReadBuffer(inbuf, inbuf_size);
                 TVPTLG5DecompressSlide(filter_types, inbuf, inbuf_size,
                                        LZSS_text, 0);
             } catch(...) {
-                TJSAlignedDealloc(inbuf);
+                TLGArenaDealloc(inbuf);
                 throw;
             }
-            TJSAlignedDealloc(inbuf);
+            TLGArenaDealloc(inbuf);
         }
 
         // for each horizontal block group ...
@@ -365,9 +379,9 @@ void TVPLoadTLG6(void *formatdata, void *callbackdata,
                     curline = (tjs_uint32 *)scanlinecallback(callbackdata, yy);
                 else {
                     if(!tmpline[0]) {
-                        tmpline[0] = (tjs_uint32 *)TJSAlignedAlloc(
+                        tmpline[0] = (tjs_uint32 *)TLGArenaAlloc(
                             sizeof(tjs_uint32) * width, 4);
-                        tmpline[1] = (tjs_uint32 *)TJSAlignedAlloc(
+                        tmpline[1] = (tjs_uint32 *)TLGArenaAlloc(
                             sizeof(tjs_uint32) * width, 4);
                     }
                     curline = tmpline[yy & 1];
@@ -409,34 +423,34 @@ void TVPLoadTLG6(void *formatdata, void *callbackdata,
         }
     } catch(...) {
         if(bit_pool)
-            TJSAlignedDealloc(bit_pool);
+            TLGArenaDealloc(bit_pool);
         if(pixelbuf)
-            TJSAlignedDealloc(pixelbuf);
+            TLGArenaDealloc(pixelbuf);
         if(filter_types)
-            TJSAlignedDealloc(filter_types);
+            TLGArenaDealloc(filter_types);
         if(zeroline)
-            TJSAlignedDealloc(zeroline);
+            TLGArenaDealloc(zeroline);
         if(LZSS_text)
-            TJSAlignedDealloc(LZSS_text - 16);
+            TLGArenaDealloc(LZSS_text - 16);
         if(tmpline[0]) {
-            TJSAlignedDealloc(tmpline[0]);
-            TJSAlignedDealloc(tmpline[1]);
+            TLGArenaDealloc(tmpline[0]);
+            TLGArenaDealloc(tmpline[1]);
         }
         throw;
     }
     if(bit_pool)
-        TJSAlignedDealloc(bit_pool);
+        TLGArenaDealloc(bit_pool);
     if(pixelbuf)
-        TJSAlignedDealloc(pixelbuf);
+        TLGArenaDealloc(pixelbuf);
     if(filter_types)
-        TJSAlignedDealloc(filter_types);
+        TLGArenaDealloc(filter_types);
     if(zeroline)
-        TJSAlignedDealloc(zeroline);
+        TLGArenaDealloc(zeroline);
     if(LZSS_text)
-        TJSAlignedDealloc(LZSS_text - 16);
+        TLGArenaDealloc(LZSS_text - 16);
     if(tmpline[0]) {
-        TJSAlignedDealloc(tmpline[0]);
-        TJSAlignedDealloc(tmpline[1]);
+        TLGArenaDealloc(tmpline[0]);
+        TLGArenaDealloc(tmpline[1]);
     }
 }
 

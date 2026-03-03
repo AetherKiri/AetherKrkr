@@ -56,12 +56,79 @@ bool TVPAcceptSaveAsJPG(void *formatdata, const ttstr &type,
 }
 
 extern "C" {
-#include <turbojpeg.h>
 #define XMD_H
 #include <jpeglib.h>
 #include <jerror.h>
 }
-#define TVP_USE_TURBO_JPEG_API
+
+#include "TVPDecodeArena.h"
+
+//---------------------------------------------------------------------------
+// Arena-aware JPEG memory manager hooks
+//---------------------------------------------------------------------------
+#if defined(__APPLE__) || defined(__linux__) || defined(__ANDROID__)
+
+struct TVPJpegMemHooks {
+    decltype(jpeg_memory_mgr::alloc_small) orig_alloc_small;
+    decltype(jpeg_memory_mgr::alloc_large) orig_alloc_large;
+    decltype(jpeg_memory_mgr::free_pool) orig_free_pool;
+    decltype(jpeg_memory_mgr::self_destruct) orig_self_destruct;
+};
+
+static thread_local TVPJpegMemHooks sJpegHooks;
+
+static void *JPEG_arena_alloc_small(j_common_ptr cinfo, int pool_id, size_t size) {
+    if (TVPDecodeArenaActive()) {
+        void *p = TVPDecodeArenaAlloc(size);
+        if (p) return p;
+    }
+    return sJpegHooks.orig_alloc_small(cinfo, pool_id, size);
+}
+
+static void *JPEG_arena_alloc_large(j_common_ptr cinfo, int pool_id, size_t size) {
+    if (TVPDecodeArenaActive()) {
+        void *p = TVPDecodeArenaAlloc(size);
+        if (p) return p;
+    }
+    return sJpegHooks.orig_alloc_large(cinfo, pool_id, size);
+}
+
+static void JPEG_arena_free_pool(j_common_ptr cinfo, int pool_id) {
+    if (TVPDecodeArenaActive()) return;
+    sJpegHooks.orig_free_pool(cinfo, pool_id);
+}
+
+static void JPEG_arena_self_destruct(j_common_ptr cinfo) {
+    if (TVPDecodeArenaActive()) {
+        // Pool memory lives in the arena — skip free_pool walks.
+        // But the memory manager struct itself was malloc'd by jpeg_create_*,
+        // so we must free it here to avoid a leak.
+        if (cinfo->mem) {
+            free(cinfo->mem);
+            cinfo->mem = nullptr;
+        }
+        return;
+    }
+    sJpegHooks.orig_self_destruct(cinfo);
+}
+
+static void TVPInstallJpegArenaHooks(j_common_ptr cinfo) {
+    jpeg_memory_mgr *mem = cinfo->mem;
+    if (!mem) return;
+    sJpegHooks.orig_alloc_small = mem->alloc_small;
+    sJpegHooks.orig_alloc_large = mem->alloc_large;
+    sJpegHooks.orig_free_pool = mem->free_pool;
+    sJpegHooks.orig_self_destruct = mem->self_destruct;
+    mem->alloc_small = JPEG_arena_alloc_small;
+    mem->alloc_large = JPEG_arena_alloc_large;
+    mem->free_pool = JPEG_arena_free_pool;
+    mem->self_destruct = JPEG_arena_self_destruct;
+}
+
+#else
+static void TVPInstallJpegArenaHooks(j_common_ptr) {}
+#endif
+
 //---------------------------------------------------------------------------
 // JPEG loading handler
 //---------------------------------------------------------------------------
@@ -173,99 +240,13 @@ void TVPLoadJPEG(void *formatdata, void *callbackdata,
                  tTVPMetaInfoPushCallback metainfopushcallback,
                  tTJSBinaryStream *src, tjs_int keyidx,
                  tTVPGraphicLoadMode mode) {
-#ifdef TVP_USE_TURBO_JPEG_API
-    // JPEG does not support palettized image
     if(mode == glmPalettized)
         TVPThrowExceptionMessage(TVPJPEGLoadError,
                                  ttstr(TVPUnsupportedJpegPalette));
 
-    unsigned long jpegSize = (unsigned long)src->GetSize();
-    unsigned char *jpegBuf = new unsigned char[jpegSize];
-    tjs_uint nbytes = src->Read(jpegBuf, jpegSize);
-    if(nbytes != jpegSize) {
-        delete[] jpegBuf;
-        TVPThrowExceptionMessage(TVPReadError);
-    }
-
-    int jpegSubsamp, width, height;
-    tjhandle jpegDecompressor = tjInitDecompress();
-    tjDecompressHeader2(jpegDecompressor, jpegBuf, jpegSize, &width, &height,
-                        &jpegSubsamp);
-    sizecallback(callbackdata, width, height,
-                 gpfRGB); // jpeg has no alpha channel
-
-    // decompress option
-    int flags = TJFLAG_FASTDCT;
-    switch(TVPJPEGLoadPrecision) {
-        case jlpLow:
-            flags = TJFLAG_FASTDCT | TJFLAG_FASTUPSAMPLE;
-            break;
-        case jlpMedium:
-            flags = TJFLAG_FASTDCT;
-            break;
-        case jlpHigh:
-            flags = TJFLAG_ACCURATEDCT;
-            break;
-    }
-    // flags |= TJFLAG_BOTTOMUP;
-    int pixelFormat = TJPF_RGBA;
-    int numcolor = 4;
-    if(mode == glmGrayscale) {
-        pixelFormat = TJPF_GRAY;
-        numcolor = 1;
-    }
-
-    unsigned char *buffer = nullptr;
-    try {
-        buffer = tjAlloc(width * height * numcolor);
-        tjDecompress2(jpegDecompressor, jpegBuf, jpegSize, buffer, width,
-                      width * numcolor, height, pixelFormat, flags);
-        if(mode == glmGrayscale) {
-            for(int y = 0; y < height; y++) {
-                void *scanline = scanlinecallback(callbackdata, y);
-                if(!scanline)
-                    break;
-                memcpy(scanline, (const void *)&buffer[y * width], width);
-                scanlinecallback(callbackdata, -1);
-            }
-        } else {
-            for(int y = 0; y < height; y++) {
-                void *scanline = scanlinecallback(callbackdata, y);
-                if(!scanline)
-                    break;
-                memcpy(scanline,
-                       (const void *)&buffer[y * width * sizeof(tjs_uint32)],
-                       width * sizeof(tjs_uint32));
-                scanlinecallback(callbackdata, -1);
-            }
-        }
-        delete[] jpegBuf;
-        jpegBuf = nullptr;
-        tjFree(buffer);
-        buffer = nullptr;
-    } catch(...) {
-        delete[] jpegBuf;
-        jpegBuf = nullptr;
-        tjFree(buffer);
-        tjDestroy(jpegDecompressor);
-        throw;
-    }
-    tjDestroy(jpegDecompressor);
-#else
-    // JPEG loading handler
-
-    // JPEG does not support palettized image
-    if(mode == glmPalettized)
-        TVPThrowExceptionMessage(TVPJPEGLoadError,
-                                 ttstr(TVPUnsupportedJpegPalette));
-
-    // prepare variables
     jpeg_decompress_struct cinfo;
     my_error_mgr jerr;
-    JSAMPARRAY buffer;
-    // tjs_int row_stride;
 
-    // error handling
     cinfo.err = jpeg_std_error(&jerr.pub);
     jerr.pub.error_exit = my_error_exit;
     jerr.pub.emit_message = my_emit_message;
@@ -273,23 +254,17 @@ void TVPLoadJPEG(void *formatdata, void *callbackdata,
     jerr.pub.format_message = my_format_message;
     jerr.pub.reset_error_mgr = my_reset_error_mgr;
 
-    // create decompress object
     jpeg_create_decompress(&cinfo);
-
-    // set data source
+    TVPInstallJpegArenaHooks((j_common_ptr)&cinfo);
     jpeg_TStream_src(&cinfo, src);
-
-    // read the header
     jpeg_read_header(&cinfo, TRUE);
 
-    // decompress option
     switch(TVPJPEGLoadPrecision) {
         case jlpLow:
             cinfo.dct_method = JDCT_IFAST;
             cinfo.do_fancy_upsampling = FALSE;
             break;
         case jlpMedium:
-            // cinfo.dct_method = JDCT_IFAST;
             cinfo.dct_method = JDCT_ISLOW;
             cinfo.do_fancy_upsampling = TRUE;
             break;
@@ -299,72 +274,26 @@ void TVPLoadJPEG(void *formatdata, void *callbackdata,
             break;
     }
 
-    if(mode == glmGrayscale)
+    if(mode == glmGrayscale) {
         cinfo.out_color_space = JCS_GRAYSCALE;
+    } else {
+        cinfo.out_color_space = JCS_EXT_RGBA;
+    }
 
-    // start decompression
     jpeg_start_decompress(&cinfo);
 
     try {
-        sizecallback(callbackdata, cinfo.output_width, cinfo.output_height);
-        if(mode == glmNormal && cinfo.out_color_space == JCS_RGB) {
-            buffer = new JSAMPROW[cinfo.output_height];
-            for(unsigned int i = 0; i < cinfo.output_height; i++) {
-                buffer[i] = (JSAMPLE *)scanlinecallback(callbackdata, i);
-            }
-            while(cinfo.output_scanline < cinfo.output_height) {
-                jpeg_read_scanlines(&cinfo, buffer + cinfo.output_scanline,
-                                    cinfo.output_height -
-                                        cinfo.output_scanline);
-            }
-            delete[] buffer;
-            for(unsigned int i = 0; i < cinfo.output_height; i++) {
-                scanlinecallback(callbackdata, i);
-                scanlinecallback(callbackdata, -1);
-            }
-        } else {
-            buffer = (*cinfo.mem->alloc_sarray)(
-                (j_common_ptr)&cinfo, JPOOL_IMAGE,
-                cinfo.output_width * cinfo.output_components + 3,
-                cinfo.rec_outbuf_height);
+        sizecallback(callbackdata, cinfo.output_width, cinfo.output_height,
+                     gpfRGB);
 
-            while(cinfo.output_scanline < cinfo.output_height) {
-                tjs_int startline = cinfo.output_scanline;
-
-                jpeg_read_scanlines(&cinfo, buffer, cinfo.rec_outbuf_height);
-
-                tjs_int endline = cinfo.output_scanline;
-                tjs_int bufline;
-                tjs_int line;
-
-                for(line = startline, bufline = 0; line < endline;
-                    line++, bufline++) {
-                    void *scanline = scanlinecallback(callbackdata, line);
-                    if(!scanline)
-                        break;
-
-                    // color conversion
-                    if(mode == glmGrayscale) {
-                        // write through
-                        memcpy(scanline, buffer[bufline], cinfo.output_width);
-                    } else {
-                        if(cinfo.out_color_space == JCS_RGB) {
-                            memcpy(scanline, buffer[bufline],
-                                   cinfo.output_width * sizeof(tjs_uint32));
-                        } else {
-                            // expand 8bits to 32bits
-                            TVPExpand8BitTo32BitGray(
-                                (tjs_uint32 *)scanline,
-                                (tjs_uint8 *)buffer[bufline],
-                                cinfo.output_width);
-                        }
-                    }
-
-                    scanlinecallback(callbackdata, -1);
-                }
-                if(line != endline)
-                    break; // interrupted by !scanline
-            }
+        while(cinfo.output_scanline < cinfo.output_height) {
+            tjs_int y = cinfo.output_scanline;
+            void *scanline = scanlinecallback(callbackdata, y);
+            if(!scanline)
+                break;
+            JSAMPROW row = (JSAMPROW)scanline;
+            jpeg_read_scanlines(&cinfo, &row, 1);
+            scanlinecallback(callbackdata, -1);
         }
     } catch(...) {
         jpeg_destroy_decompress(&cinfo);
@@ -373,7 +302,6 @@ void TVPLoadJPEG(void *formatdata, void *callbackdata,
 
     jpeg_finish_decompress(&cinfo);
     jpeg_destroy_decompress(&cinfo);
-#endif
 }
 //---------------------------------------------------------------------------
 struct stream_destination_mgr {
@@ -627,13 +555,9 @@ void TVPLoadHeaderJPG(void *formatdata, tTJSBinaryStream *src,
     jerr.pub.format_message = my_format_message;
     jerr.pub.reset_error_mgr = my_reset_error_mgr;
 
-    // create decompress object
     jpeg_create_decompress(&cinfo);
-
-    // set data source
+    TVPInstallJpegArenaHooks((j_common_ptr)&cinfo);
     jpeg_TStream_src(&cinfo, src);
-
-    // read the header
     jpeg_read_header(&cinfo, TRUE);
 
     *dic = TJSCreateDictionaryObject();

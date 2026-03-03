@@ -39,6 +39,8 @@
 #include <list>
 #include <spdlog/spdlog.h>
 
+#include "TVPDecodeArena.h"
+
 void TVPLoadPVRv3(void *formatdata, void *callbackdata,
                   tTVPGraphicSizeCallback sizecallback,
                   tTVPGraphicScanLineCallback scanlinecallback,
@@ -1926,9 +1928,6 @@ int TVPLoadGraphic(iTVPBaseBitmap *dest, const ttstr &name, tjs_int32 keyidx,
     }
 
     // not found
-#if defined(WIN32) && defined(_DEBUG)
-    TVPAddLog(TJS_W("load graphic: ") + nname);
-#endif
 
     // load into dest
     tTVPGraphicImageData *data = nullptr;
@@ -1955,6 +1954,9 @@ int TVPLoadGraphic(iTVPBaseBitmap *dest, const ttstr &name, tjs_int32 keyidx,
             void *bits = bmp->GetScanLine(0);
             if(bits) memset(bits, 0, 4);
         } else {
+#if defined(__APPLE__) || defined(__linux__) || defined(__ANDROID__)
+            TVPDecodeArena::Instance().Begin();
+#endif
             if(mode == glmNormal && keyidx == TVP_clNone && !desw && !desh) {
                 texture = TVPInternalLoadTexture(nname, &mi, &pn);
             }
@@ -1962,6 +1964,9 @@ int TVPLoadGraphic(iTVPBaseBitmap *dest, const ttstr &name, tjs_int32 keyidx,
                 bmp = TVPInternalLoadBitmap(nname, keyidx, desw, desh, &mi,
                                             mode, &pn);
             }
+#if defined(__APPLE__) || defined(__linux__) || defined(__ANDROID__)
+            TVPDecodeArena::Instance().End();
+#endif
         }
 
         if(provincename)
