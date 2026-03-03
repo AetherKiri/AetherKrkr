@@ -15,6 +15,13 @@
 #include "tjsUtils.h"
 #include "tjsLex.h"
 #include <algorithm>
+#include <atomic>
+
+static std::atomic<int64_t> sTJSVS_NetBytes{0};
+
+extern "C" int64_t TJS_GetVSNetBytes() {
+    return sTJSVS_NetBytes.load(std::memory_order_relaxed);
+}
 
 
 
@@ -67,6 +74,8 @@ namespace TJS {
         if(!ret)
             TJSThrowStringAllocError();
         *(size_t *)ret = len; // embed size
+        sTJSVS_NetBytes.fetch_add((int64_t)(len * sizeof(tjs_char) + sizeof(size_t)),
+                                  std::memory_order_relaxed);
         return (tjs_char *)(ret + sizeof(size_t));
     }
     //---------------------------------------------------------------------------
@@ -74,33 +83,31 @@ namespace TJS {
         if(!buf)
             return TJSVS_malloc(len);
 
-        // compare embeded size
         size_t *ptr = (size_t *)((char *)buf - sizeof(size_t));
         if(*ptr >= len)
-            return buf; // still adequate
+            return buf;
 
-        //	char *ret = (char*)realloc(ptr,
-        //		(len = (len + TJSVS_ALLOC_INC_SIZE))*sizeof(tjs_char)
-        //+
-        // sizeof(size_t));
         if(len < TJSVS_ALLOC_DOUBLE_LIMIT)
             len = len * 2;
         else
             len = len + TJSVS_ALLOC_INC_SIZE_L;
 
-        char *ret = (char *)malloc( // ptr,
-            len * sizeof(tjs_char) + sizeof(size_t));
+        size_t newAllocSize = len * sizeof(tjs_char) + sizeof(size_t);
+        char *ret = (char *)malloc(newAllocSize);
         if(!ret)
             TJSThrowStringAllocError();
         memcpy(ret + sizeof(size_t), ptr + 1, *ptr * sizeof(tjs_char));
-        *(size_t *)ret = len; // embed size
+        sTJSVS_NetBytes.fetch_add((int64_t)newAllocSize, std::memory_order_relaxed);
+        *(size_t *)ret = len;
         TJSVS_free(buf);
         return (tjs_char *)(ret + sizeof(size_t));
     }
     //---------------------------------------------------------------------------
     /*static inline*/ void TJSVS_free(tjs_char *buf) {
-        // free buffer
-        free((char *)buf - sizeof(size_t));
+        size_t *ptr = (size_t *)((char *)buf - sizeof(size_t));
+        sTJSVS_NetBytes.fetch_sub((int64_t)(*ptr * sizeof(tjs_char) + sizeof(size_t)),
+                                  std::memory_order_relaxed);
+        free(ptr);
     }
     //---------------------------------------------------------------------------
 

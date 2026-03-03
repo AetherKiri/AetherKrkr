@@ -13,11 +13,20 @@
 
 #include <algorithm>
 #include <functional>
+#include <atomic>
 #include "tjsArray.h"
 #include "tjsDictionary.h"
 #include "tjsUtils.h"
 #include "tjsBinarySerializer.h"
 #include "tjsOctPack.h"
+
+static std::atomic<int64_t> sTJSArrayCreateCount{0};
+static std::atomic<int64_t> sTJSArrayDestroyCount{0};
+
+extern "C" void TJS_GetArrayStats(int64_t *created, int64_t *destroyed) {
+    if(created) *created = sTJSArrayCreateCount.load(std::memory_order_relaxed);
+    if(destroyed) *destroyed = sTJSArrayDestroyCount.load(std::memory_order_relaxed);
+}
 
 #ifndef TJS_NO_REGEXP
 
@@ -1371,7 +1380,9 @@ tTJSArrayObject::tTJSArrayObject() :
 }
 
 //---------------------------------------------------------------------------
-tTJSArrayObject::~tTJSArrayObject() {}
+tTJSArrayObject::~tTJSArrayObject() {
+    sTJSArrayDestroyCount.fetch_add(1, std::memory_order_relaxed);
+}
 //---------------------------------------------------------------------------
 
 #define ARRAY_GET_NI                                                           \
@@ -1840,6 +1851,7 @@ iTJSDispatch2 *TJSCreateArrayObject(iTJSDispatch2 **classout) {
     (arrayclass.Obj)
         ->CreateNew(0, nullptr, nullptr, (iTJSDispatch2 **)&arrayobj, 0,
                     nullptr, arrayclass.Obj);
+    sTJSArrayCreateCount.fetch_add(1, std::memory_order_relaxed);
     return arrayobj;
 }
 //---------------------------------------------------------------------------

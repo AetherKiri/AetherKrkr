@@ -18,6 +18,9 @@
 #include "SysInitIntf.h"
 #include "RenderManager.h"
 #include "TickCount.h"
+#ifdef __APPLE__
+#include <malloc/malloc.h>
+#endif
 
 // TVP input event classes + TVPPostInputEvent
 #include "WindowIntf.h"
@@ -128,6 +131,10 @@ void EngineLoop::DoStartup(const std::string& path) {
     spdlog::info("EngineLoop::DoStartup starting game from: {}", path);
 
     ::Application->StartApplication(path);
+
+#ifdef __APPLE__
+    malloc_zone_pressure_relief(nullptr, 0);
+#endif
 
     // Run one frame immediately (matches original behavior)
     Tick(0);

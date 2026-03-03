@@ -12,6 +12,7 @@
 #include "tjsCommHead.h"
 #include <clocale>
 
+#include <atomic>
 #include <cassert>
 #include <boost/locale.hpp>
 #include <spdlog/spdlog.h>
@@ -632,18 +633,29 @@ namespace TJS {
         return nullptr;
     }
 
+    static std::atomic<int64_t> sTJSMallocNetBytes{0};
+    static std::atomic<int64_t> sTJSMallocAllocCount{0};
+    static std::atomic<int64_t> sTJSMallocFreeCount{0};
+
+    void TJS_GetMallocStats(int64_t &netBytes, int64_t &allocCount, int64_t &freeCount) {
+        netBytes = sTJSMallocNetBytes.load(std::memory_order_relaxed);
+        allocCount = sTJSMallocAllocCount.load(std::memory_order_relaxed);
+        freeCount = sTJSMallocFreeCount.load(std::memory_order_relaxed);
+    }
+
     void *TJS_malloc(size_t len) {
         char *ret = (char *)malloc(len + sizeof(size_t));
         if(!ret)
             return nullptr;
         *(size_t *)ret = len; // embed size
+        sTJSMallocNetBytes.fetch_add((int64_t)len, std::memory_order_relaxed);
+        sTJSMallocAllocCount.fetch_add(1, std::memory_order_relaxed);
         return ret + sizeof(size_t);
     }
 
     void *TJS_realloc(void *buf, size_t len) {
         if(!buf)
             return TJS_malloc(len);
-        // compare embeded size
         size_t *ptr = (size_t *)((char *)buf - sizeof(size_t));
         if(*ptr >= len)
             return buf; // still adequate
@@ -656,8 +668,12 @@ namespace TJS {
     }
 
     void TJS_free(void *buf) {
-        if(buf)
-            free((char *)buf - sizeof(size_t));
+        if(buf) {
+            size_t *ptr = (size_t *)((char *)buf - sizeof(size_t));
+            sTJSMallocNetBytes.fetch_sub((int64_t)(*ptr), std::memory_order_relaxed);
+            sTJSMallocFreeCount.fetch_add(1, std::memory_order_relaxed);
+            free(ptr);
+        }
     }
 
     tjs_char *TJS_strrchr(const tjs_char *s, int c) {

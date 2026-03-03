@@ -15,6 +15,15 @@
 #include "tjsArray.h"
 #include "tjsBinarySerializer.h"
 #include "tjsDebug.h"
+#include <atomic>
+
+static std::atomic<int64_t> sTJSDictCreateCount{0};
+static std::atomic<int64_t> sTJSDictDestroyCount{0};
+
+extern "C" void TJS_GetDictStats(int64_t *created, int64_t *destroyed) {
+    if(created) *created = sTJSDictCreateCount.load(std::memory_order_relaxed);
+    if(destroyed) *destroyed = sTJSDictDestroyCount.load(std::memory_order_relaxed);
+}
 
 namespace TJS {
     //---------------------------------------------------------------------------
@@ -715,7 +724,9 @@ namespace TJS {
         CallFinalize = false;
     }
     //---------------------------------------------------------------------------
-    tTJSDictionaryObject::~tTJSDictionaryObject() = default;
+    tTJSDictionaryObject::~tTJSDictionaryObject() {
+        sTJSDictDestroyCount.fetch_add(1, std::memory_order_relaxed);
+    }
     //---------------------------------------------------------------------------
     tjs_error
     tTJSDictionaryObject::FuncCall(tjs_uint32 flag, const tjs_char *membername,
@@ -800,6 +811,7 @@ namespace TJS {
         (dictionaryclass.Obj)
             ->CreateNew(0, nullptr, nullptr, (iTJSDispatch2 **)&dictionaryobj,
                         0, nullptr, dictionaryclass.Obj);
+        sTJSDictCreateCount.fetch_add(1, std::memory_order_relaxed);
         return dictionaryobj;
     }
     //---------------------------------------------------------------------------
