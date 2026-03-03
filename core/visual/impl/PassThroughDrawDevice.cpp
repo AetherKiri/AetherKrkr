@@ -21,6 +21,8 @@
 #include "TickCount.h"
 #include <assert.h>
 #include <math.h>
+#include "DrawDeviceGLESModule.h"
+using namespace DrawDeviceGLES;
 /*
         PassThroughDrawDevice クラスには、Window.PassThroughDrawDevice
    として アクセスできる。通常、Window クラスを生成すると、その
@@ -525,6 +527,15 @@ TJS_BEGIN_NATIVE_METHOD_DECL(/*func. name*/ lockTouchSize) {
 }
 TJS_END_NATIVE_METHOD_DECL(/*func. name*/ lockTouchSize)
 
+//----------------------------------------------------------------------
+TJS_BEGIN_NATIVE_METHOD_DECL(/*func. name*/ getModule) {
+    TJS_GET_NATIVE_INSTANCE(
+        /*var. name*/ _this,
+        /*var. type*/ tTJSNI_PassThroughDrawDevice);
+    return GetModuleForDevice(_this->GetDevice(), result, numparams, param);
+}
+TJS_END_NATIVE_METHOD_DECL(/*func. name*/ getModule)
+
 //---------------------------------------------------------------------------
 //----------------------------------------------------------------------
 // properties
@@ -607,6 +618,7 @@ tTJSNI_PassThroughDrawDevice::tTJSNI_PassThroughDrawDevice() {
 }
 //---------------------------------------------------------------------------
 tTJSNI_PassThroughDrawDevice::~tTJSNI_PassThroughDrawDevice() {
+    ClearCachedModulesForDevice(Device);
     if(Device)
         Device->Destruct(), Device = nullptr;
 }
@@ -618,6 +630,7 @@ tjs_error tTJSNI_PassThroughDrawDevice::Construct(tjs_int numparams,
 }
 //---------------------------------------------------------------------------
 void tTJSNI_PassThroughDrawDevice::Invalidate() {
+    ClearCachedModulesForDevice(Device);
     if(Device)
         Device->Destruct(), Device = nullptr;
 }
