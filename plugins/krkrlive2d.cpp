@@ -62,9 +62,10 @@ extern void TVPSetPostDrawHook(void (*hook)());
 // Registered Layer from krkrgles.cpp — used to blit Live2D content
 extern iTJSDispatch2 *KrkrGLES_GetRegisteredLayer();
 
-// CopyFBOToLayer from krkrgles.cpp — auto-switches GPU/CPU path
+// CopyFBOToLayer from krkrgles.cpp — auto-switches GPU/CPU path.
+// prevFbo: caller-saved FBO to restore after blit (-1 to query internally).
 extern bool CopyFBOToLayer(GLuint fbo, GLsizei srcW, GLsizei srcH,
-                           iTJSDispatch2 *layer);
+                           iTJSDispatch2 *layer, GLint prevFbo = -1);
 
 class CubismLive2DModel; // forward
 static std::vector<CubismLive2DModel*> g_activeModels;
@@ -502,11 +503,11 @@ public:
 
     void BlitOverlay() {
         if (!loaded_ || !internalFbo_ || !fboTex_) return;
+        GLint curFBO = 0;
+        glGetIntegerv(GL_FRAMEBUFFER_BINDING, &curFBO);
         GLint vp[4];
         glGetIntegerv(GL_VIEWPORT, vp);
-        GLint currentFBO = 0;
-        glGetIntegerv(GL_FRAMEBUFFER_BINDING, &currentFBO);
-        BlitFBOToTarget(currentFBO, vp[0], vp[1], vp[2], vp[3]);
+        BlitFBOToTarget(curFBO, vp[0], vp[1], vp[2], vp[3]);
     }
 
     void UpdateAndDraw() {

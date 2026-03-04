@@ -14,6 +14,12 @@
 #include <GLES2/gl2ext.h>
 #include <GLES3/gl3.h>
 
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+#include <arm_neon.h>
+#elif defined(__SSSE3__)
+#include <tmmintrin.h>
+#endif
+
 #if defined(__ANDROID__)
 #include <android/log.h>
 #define GLES_LOGI(...) __android_log_print(ANDROID_LOG_INFO, "krkrgles", __VA_ARGS__)
@@ -965,7 +971,7 @@ static iTJSDispatch2 *FindLayerInParams(tjs_int n, tTJSVariant **p) {
 // Returns true if GPU path was used, false if not available.
 // ---------------------------------------------------------------------------
 static bool CopyFBOToLayerGPU(GLuint srcFbo, GLsizei srcW, GLsizei srcH,
-                              iTJSDispatch2 *layer) {
+                              iTJSDispatch2 *layer, GLint prevFbo) {
     tTJSVariant vTex, vIW, vIH;
     if (TJS_FAILED(layer->PropGet(0, TJS_W("mainImageGLTexture"), nullptr, &vTex, layer)))
         return false;
@@ -984,18 +990,15 @@ static bool CopyFBOToLayerGPU(GLuint srcFbo, GLsizei srcW, GLsizei srcH,
     GLsizei layerW = static_cast<GLsizei>(static_cast<tTVInteger>(vW));
     GLsizei layerH = static_cast<GLsizei>(static_cast<tTVInteger>(vH));
 
-    GLint prevFbo;
-    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prevFbo);
+    static GLuint s_dstFbo = 0;
 
-    GLuint dstFbo = 0;
-    glGenFramebuffers(1, &dstFbo);
-    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, dstFbo);
+    if (!s_dstFbo) glGenFramebuffers(1, &s_dstFbo);
+
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, s_dstFbo);
     glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
                            GL_TEXTURE_2D, layerTexId, 0);
-
     if (glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
         glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(prevFbo));
-        glDeleteFramebuffers(1, &dstFbo);
         return false;
     }
 
@@ -1004,14 +1007,11 @@ static bool CopyFBOToLayerGPU(GLuint srcFbo, GLsizei srcW, GLsizei srcH,
     GLsizei blitW = (layerW < srcW) ? layerW : srcW;
     GLsizei blitH = (layerH < srcH) ? layerH : srcH;
 
-    // Source FBO is bottom-up (OGL convention); Layer texture in GPU mode
-    // is also OGL convention (bottom-up), so no Y-flip needed.
     glBlitFramebuffer(0, 0, blitW, blitH,
                       0, 0, blitW, blitH,
                       GL_COLOR_BUFFER_BIT, GL_NEAREST);
 
     glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(prevFbo));
-    glDeleteFramebuffers(1, &dstFbo);
 
     tjs_uint hint = 0;
     layer->FuncCall(0, TJS_W("invalidateGLTextureCache"), &hint, nullptr, 0, nullptr, layer);
@@ -1025,11 +1025,92 @@ static bool CopyFBOToLayerGPU(GLuint srcFbo, GLsizei srcW, GLsizei srcH,
 }
 
 // ---------------------------------------------------------------------------
+// Convert RGBA (bottom-up) source buffer to BGRA (top-down) layer buffer.
+// ---------------------------------------------------------------------------
+static void ConvertRGBA_to_BGRA(const uint8_t *src, GLsizei srcW, GLsizei srcH,
+                                uint8_t *dst, tjs_int pitch,
+                                tjs_int copyW, tjs_int copyH) {
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+    const int simdWidth = 16;
+    const int simdCopyW = copyW & ~(simdWidth - 1);
+#endif
+    for (tjs_int y = 0; y < copyH; ++y) {
+        const uint8_t *srcRow = src +
+            static_cast<size_t>(srcH - 1 - y) * srcW * 4;
+        uint8_t *dstRow = dst + static_cast<size_t>(y) * pitch;
+        tjs_int x = 0;
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+        for (; x < simdCopyW; x += simdWidth) {
+            uint8x16x4_t px = vld4q_u8(srcRow + x * 4);
+            uint8x16_t tmp = px.val[0];
+            px.val[0] = px.val[2];
+            px.val[2] = tmp;
+            vst4q_u8(dstRow + x * 4, px);
+        }
+#elif defined(__SSSE3__)
+        const __m128i shuffleMask = _mm_setr_epi8(
+            2, 1, 0, 3, 6, 5, 4, 7, 10, 9, 8, 11, 14, 13, 12, 15);
+        for (; x + 4 <= copyW; x += 4) {
+            __m128i v = _mm_loadu_si128(
+                reinterpret_cast<const __m128i *>(srcRow + x * 4));
+            v = _mm_shuffle_epi8(v, shuffleMask);
+            _mm_storeu_si128(reinterpret_cast<__m128i *>(dstRow + x * 4), v);
+        }
+#endif
+        for (; x < copyW; ++x) {
+            dstRow[x * 4 + 0] = srcRow[x * 4 + 2]; // B
+            dstRow[x * 4 + 1] = srcRow[x * 4 + 1]; // G
+            dstRow[x * 4 + 2] = srcRow[x * 4 + 0]; // R
+            dstRow[x * 4 + 3] = srcRow[x * 4 + 3]; // A
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// PBO double-buffer state for async glReadPixels.
+// Uses two PBOs: one receives the current frame's async read while the
+// other provides the previous frame's data via glMapBufferRange.
+// Introduces one frame of latency but eliminates GPU pipeline stalls.
+// ---------------------------------------------------------------------------
+struct PBOState {
+    GLuint pbo[2] = {};
+    int idx = 0;
+    GLsizei w = 0, h = 0;
+    bool primed = false;
+    bool disabled = false;
+
+    bool EnsureSize(GLsizei newW, GLsizei newH) {
+        if (disabled) return false;
+        if (newW == w && newH == h && pbo[0]) return true;
+        if (pbo[0]) { glDeleteBuffers(2, pbo); pbo[0] = pbo[1] = 0; }
+        while (glGetError() != GL_NO_ERROR) {}
+        glGenBuffers(2, pbo);
+        size_t sz = static_cast<size_t>(newW) * newH * 4;
+        for (int i = 0; i < 2; ++i) {
+            glBindBuffer(GL_PIXEL_PACK_BUFFER, pbo[i]);
+            glBufferData(GL_PIXEL_PACK_BUFFER, static_cast<GLsizeiptr>(sz),
+                         nullptr, GL_STREAM_READ);
+        }
+        glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+        if (glGetError() != GL_NO_ERROR) {
+            if (pbo[0]) glDeleteBuffers(2, pbo);
+            pbo[0] = pbo[1] = 0;
+            disabled = true;
+            GLES_LOGW("PBO creation failed, falling back to sync glReadPixels");
+            return false;
+        }
+        w = newW; h = newH; primed = false;
+        return true;
+    }
+};
+
+// ---------------------------------------------------------------------------
 // CPU fallback: read pixels from GL FBO → TJS Layer bitmap.
 // GL outputs RGBA bottom-up; krkr2 Layer CPU buffer uses BGRA top-down.
+// Uses PBO double-buffering when available (GLES 3.0+) to avoid stalls.
 // ---------------------------------------------------------------------------
 static bool CopyFBOToLayerCPU(GLuint fbo, GLsizei srcW, GLsizei srcH,
-                              iTJSDispatch2 *layer) {
+                              iTJSDispatch2 *layer, GLint prevFbo) {
     tTJSVariant vW, vH, vBuf, vPitch;
     layer->PropGet(0, TJS_W("imageWidth"), nullptr, &vW, layer);
     layer->PropGet(0, TJS_W("imageHeight"), nullptr, &vH, layer);
@@ -1043,26 +1124,55 @@ static bool CopyFBOToLayerCPU(GLuint fbo, GLsizei srcW, GLsizei srcH,
     tjs_int pitch = static_cast<tjs_int>(vPitch);
     if (!dst || layerW <= 0 || layerH <= 0) return false;
 
-    std::vector<uint8_t> rgba(static_cast<size_t>(srcW) * srcH * 4);
-    GLint prevFbo;
-    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prevFbo);
-    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
-    glReadPixels(0, 0, srcW, srcH, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
-    glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(prevFbo));
-
     tjs_int copyW = (layerW < srcW) ? layerW : srcW;
     tjs_int copyH = (layerH < srcH) ? layerH : srcH;
 
-    for (tjs_int y = 0; y < copyH; ++y) {
-        const uint8_t *srcRow = rgba.data() +
-            static_cast<size_t>(srcH - 1 - y) * srcW * 4;
-        uint8_t *dstRow = dst + static_cast<size_t>(y) * pitch;
-        for (tjs_int x = 0; x < copyW; ++x) {
-            dstRow[x * 4 + 0] = srcRow[x * 4 + 2]; // B
-            dstRow[x * 4 + 1] = srcRow[x * 4 + 1]; // G
-            dstRow[x * 4 + 2] = srcRow[x * 4 + 0]; // R
-            dstRow[x * 4 + 3] = srcRow[x * 4 + 3]; // A
+    static PBOState s_pbo;
+    const uint8_t *srcPixels = nullptr;
+    bool mapped = false;
+
+    if (s_pbo.EnsureSize(srcW, srcH)) {
+        int readIdx = s_pbo.idx;
+        int mapIdx  = 1 - s_pbo.idx;
+
+        glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+        glBindBuffer(GL_PIXEL_PACK_BUFFER, s_pbo.pbo[readIdx]);
+        glReadPixels(0, 0, srcW, srcH, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+        glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+        glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(prevFbo));
+
+        if (s_pbo.primed) {
+            glBindBuffer(GL_PIXEL_PACK_BUFFER, s_pbo.pbo[mapIdx]);
+            srcPixels = static_cast<const uint8_t *>(
+                glMapBufferRange(GL_PIXEL_PACK_BUFFER, 0,
+                                 static_cast<GLsizeiptr>(srcW) * srcH * 4,
+                                 GL_MAP_READ_BIT));
+            if (srcPixels) {
+                mapped = true;
+            } else {
+                glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+            }
         }
+
+        s_pbo.primed = true;
+        s_pbo.idx = 1 - s_pbo.idx;
+    }
+
+    if (!srcPixels) {
+        static std::vector<uint8_t> s_rgba;
+        size_t needed = static_cast<size_t>(srcW) * srcH * 4;
+        if (s_rgba.size() < needed) s_rgba.resize(needed);
+        glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+        glReadPixels(0, 0, srcW, srcH, GL_RGBA, GL_UNSIGNED_BYTE, s_rgba.data());
+        glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(prevFbo));
+        srcPixels = s_rgba.data();
+    }
+
+    ConvertRGBA_to_BGRA(srcPixels, srcW, srcH, dst, pitch, copyW, copyH);
+
+    if (mapped) {
+        glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
+        glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
     }
 
     tTJSVariant vx(static_cast<tjs_int>(0)), vy(static_cast<tjs_int>(0)),
@@ -1077,10 +1187,11 @@ static bool CopyFBOToLayerCPU(GLuint fbo, GLsizei srcW, GLsizei srcH,
 // Copy FBO → Layer with automatic GPU/CPU path selection.
 // ---------------------------------------------------------------------------
 bool CopyFBOToLayer(GLuint fbo, GLsizei srcW, GLsizei srcH,
-                    iTJSDispatch2 *layer) {
+                    iTJSDispatch2 *layer, GLint prevFbo) {
     if (!fbo || srcW <= 0 || srcH <= 0 || !layer) return false;
-    if (CopyFBOToLayerGPU(fbo, srcW, srcH, layer)) return true;
-    return CopyFBOToLayerCPU(fbo, srcW, srcH, layer);
+    if (prevFbo < 0) glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prevFbo);
+    if (CopyFBOToLayerGPU(fbo, srcW, srcH, layer, prevFbo)) return true;
+    return CopyFBOToLayerCPU(fbo, srcW, srcH, layer, prevFbo);
 }
 
 // Global registered Layer — set by entryUpdateObject, accessed by krkrlive2d.cpp
@@ -1094,7 +1205,7 @@ static bool CopyPixelsToLayer(OffscreenFBO &fbo, tjs_int numparams,
                               tTJSVariant **param) {
     iTJSDispatch2 *layer = FindLayerInParams(numparams, param);
     if (!layer) return false;
-    return CopyFBOToLayer(fbo.GetFBO(), fbo.GetWidth(), fbo.GetHeight(), layer);
+    return CopyFBOToLayer(fbo.GetFBO(), fbo.GetWidth(), fbo.GetHeight(), layer, -1);
 }
 
 // ---------------------------------------------------------------------------
@@ -1307,7 +1418,7 @@ public:
             else if (g_live2dRenderTarget.fbo)
                 CopyFBOToLayer(g_live2dRenderTarget.fbo,
                                g_live2dRenderTarget.width,
-                               g_live2dRenderTarget.height, layer);
+                               g_live2dRenderTarget.height, layer, -1);
         }
         if (r) *r = true; return TJS_S_OK;
     }
