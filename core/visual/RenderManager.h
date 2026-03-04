@@ -153,6 +153,13 @@ public:
 
     virtual void CompactGPUCache() {}
 
+    /**
+     * Discard any stale CPU-side pixel cache so that GPU content written
+     * externally (e.g. via glBlitFramebuffer) is not overwritten by a
+     * subsequent SyncPixel() upload.
+     */
+    virtual void InvalidatePixelCache() {}
+
     static void RecycleProcess();
 };
 

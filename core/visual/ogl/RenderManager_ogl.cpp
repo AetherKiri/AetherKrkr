@@ -1837,6 +1837,11 @@ public:
 
     bool IsStatic() override { return false; }
 
+    void InvalidatePixelCache() override {
+        if (PixelData) { delete[] PixelData; PixelData = nullptr; }
+        IsTextureDirty = false;
+    }
+
     void AsTarget() override {
         SyncPixel();
         TVPSetRenderTarget(texture);

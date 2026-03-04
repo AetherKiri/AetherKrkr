@@ -11247,6 +11247,65 @@ TJS_DENY_NATIVE_PROP_SETTER
 }
 TJS_END_NATIVE_PROP_DECL(provinceImageBufferPitch)
 //----------------------------------------------------------------------
+TJS_BEGIN_NATIVE_PROP_DECL(mainImageGLTexture) {
+    TJS_BEGIN_NATIVE_PROP_GETTER {
+        TJS_GET_NATIVE_INSTANCE(_this, tTJSNI_Layer);
+        tTVPBaseTexture *img = _this->GetMainImage();
+        if (img && img->GetTexture()) {
+            *result = (tTVInteger)img->GetTexture()->GetNativeGLTextureId();
+        } else {
+            *result = (tTVInteger)0;
+        }
+        return TJS_S_OK;
+    }
+    TJS_END_NATIVE_PROP_GETTER
+    TJS_DENY_NATIVE_PROP_SETTER
+}
+TJS_END_NATIVE_PROP_DECL(mainImageGLTexture)
+//----------------------------------------------------------------------
+TJS_BEGIN_NATIVE_PROP_DECL(mainImageGLTextureInternalWidth) {
+    TJS_BEGIN_NATIVE_PROP_GETTER {
+        TJS_GET_NATIVE_INSTANCE(_this, tTJSNI_Layer);
+        tTVPBaseTexture *img = _this->GetMainImage();
+        if (img && img->GetTexture()) {
+            *result = (tTVInteger)img->GetTexture()->GetInternalWidth();
+        } else {
+            *result = (tTVInteger)0;
+        }
+        return TJS_S_OK;
+    }
+    TJS_END_NATIVE_PROP_GETTER
+    TJS_DENY_NATIVE_PROP_SETTER
+}
+TJS_END_NATIVE_PROP_DECL(mainImageGLTextureInternalWidth)
+//----------------------------------------------------------------------
+TJS_BEGIN_NATIVE_PROP_DECL(mainImageGLTextureInternalHeight) {
+    TJS_BEGIN_NATIVE_PROP_GETTER {
+        TJS_GET_NATIVE_INSTANCE(_this, tTJSNI_Layer);
+        tTVPBaseTexture *img = _this->GetMainImage();
+        if (img && img->GetTexture()) {
+            *result = (tTVInteger)img->GetTexture()->GetInternalHeight();
+        } else {
+            *result = (tTVInteger)0;
+        }
+        return TJS_S_OK;
+    }
+    TJS_END_NATIVE_PROP_GETTER
+    TJS_DENY_NATIVE_PROP_SETTER
+}
+TJS_END_NATIVE_PROP_DECL(mainImageGLTextureInternalHeight)
+//----------------------------------------------------------------------
+TJS_BEGIN_NATIVE_METHOD_DECL(invalidateGLTextureCache) {
+    TJS_GET_NATIVE_INSTANCE(_this, tTJSNI_Layer);
+    tTVPBaseTexture *img = _this->GetMainImage();
+    if (img && img->GetTexture()) {
+        img->GetTexture()->InvalidatePixelCache();
+    }
+    _this->SetImageModified(true);
+    return TJS_S_OK;
+}
+TJS_END_NATIVE_METHOD_DECL(invalidateGLTextureCache)
+//----------------------------------------------------------------------
 TJS_END_NATIVE_MEMBERS
 }
 //---------------------------------------------------------------------------
