@@ -49,6 +49,13 @@ Live2DRenderTarget g_live2dRenderTarget;
 
 extern void TVPSetPostDrawHook(void (*hook)());
 
+// Registered Layer from krkrgles.cpp — used to blit Live2D content
+extern iTJSDispatch2 *KrkrGLES_GetRegisteredLayer();
+
+// CopyFBOToLayer from krkrgles.cpp — auto-switches GPU/CPU path
+extern bool CopyFBOToLayer(GLuint fbo, GLsizei srcW, GLsizei srcH,
+                           iTJSDispatch2 *layer);
+
 class CubismLive2DModel; // forward
 static std::vector<CubismLive2DModel*> g_activeModels;
 static void EnsureContinuousHook(); // forward
@@ -610,24 +617,30 @@ private:
     GLuint blitProgram_ = 0;
     GLint locPos_ = 0, locTex_ = 0, locScale_ = 0;
     std::chrono::steady_clock::time_point lastUpdateTime_;
-    bool blittedThisFrame_ = false;
 };
 
 // ---------------------------------------------------------------------------
-// Continuous animation driver — updates all active Live2D models every frame
-// and forces the window to redraw so the overlay hook fires.
+// Continuous animation driver — updates all active Live2D models every frame.
+// When a registered Layer is available, blits via GPU/CPU CopyFBOToLayer.
+// Otherwise falls back to PostDrawHook overlay blit.
 // ---------------------------------------------------------------------------
 class Live2DContinuousCallback : public tTVPContinuousEventCallbackIntf {
 public:
     void OnContinuousCallback(tjs_uint64 /*tick*/) override {
         bool anyActive = false;
+        iTJSDispatch2 *layer = KrkrGLES_GetRegisteredLayer();
         for (auto *m : g_activeModels) {
             if (m && m->IsLoaded()) {
                 m->ContinuousUpdate();
                 anyActive = true;
+                if (layer && g_live2dRenderTarget.fbo) {
+                    CopyFBOToLayer(g_live2dRenderTarget.fbo,
+                                   g_live2dRenderTarget.width,
+                                   g_live2dRenderTarget.height, layer);
+                }
             }
         }
-        if (anyActive && TVPGetWindowCount() > 0) {
+        if (anyActive && !layer && TVPGetWindowCount() > 0) {
             tTJSNI_Window *win = TVPGetWindowListAt(0);
             if (win) TVPPostWindowUpdate(win);
         }
@@ -638,6 +651,7 @@ static Live2DContinuousCallback g_live2dContinuousCb;
 static bool g_continuousHookRegistered = false;
 
 static void Live2DPostDrawHook() {
+    if (KrkrGLES_GetRegisteredLayer()) return;
     for (auto *m : g_activeModels) {
         if (m && m->IsLoaded()) {
             m->BlitOverlay();
