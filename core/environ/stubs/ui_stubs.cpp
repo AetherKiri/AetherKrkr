@@ -386,9 +386,14 @@ public:
     void Close() override {
         closing_ = true;
         spdlog::debug("FlutterWindowLayer::Close called");
+        TVPTerminateAsync(0);
     }
 
-    void OnCloseQueryCalled(bool b) override {}
+    void OnCloseQueryCalled(bool b) override {
+        if (b) {
+            Close();
+        }
+    }
 
     void InternalKeyDown(tjs_uint16 key, tjs_uint32 shift) override {}
 

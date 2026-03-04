@@ -17,6 +17,7 @@
 // #include <commdlg.h>
 
 #include "SysInitImpl.h"
+#include "Exception.h"
 #include "StorageIntf.h"
 #include "StorageImpl.h"
 #include "MsgIntf.h"
@@ -411,6 +412,15 @@ void TVPTerminateAsync(int code) {
 //---------------------------------------------------------------------------
 void TVPTerminateSync(int code) {
     // do synchronous temination of application (never return)
+    if(TVPHostSuppressProcessExit) {
+        // In embedded host mode (Flutter), calling TVPSystemUninit() here
+        // would destroy the TJS engine while still inside a TJS call stack,
+        // causing undefined behavior (hang/crash) since exit() is suppressed.
+        // Instead, mark as terminated and throw EAbort to safely unwind the
+        // stack back to Application->Run() which catches EAbort.
+        TVPTerminateAsync(code);
+        throw EAbort(TJS_W("application exit"));
+    }
     TVPSystemUninit();
     TVPExitApplication(code);
 }
