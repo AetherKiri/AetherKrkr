@@ -1,9 +1,13 @@
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <chrono>
+#include <cmath>
 #include <cstring>
+#include <limits>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include <spdlog/spdlog.h>
@@ -33,6 +37,7 @@
 #include "CubismModelSettingJson.hpp"
 #include "Model/CubismMoc.hpp"
 #include "Model/CubismModel.hpp"
+#include "Model/CubismModelUserData.hpp"
 #include "Model/CubismUserModel.hpp"
 #include "Motion/CubismMotion.hpp"
 #include "Motion/CubismMotionManager.hpp"
@@ -260,6 +265,13 @@ inline iTJSDispatch2 *CreateIdNameDict(const ttstr &id, const ttstr &name) {
 // ---------------------------------------------------------------------------
 class CubismLive2DModel : public CubismUserModel {
 public:
+    struct MosaicRect {
+        GLint x = 0;
+        GLint y = 0;
+        GLsizei w = 0;
+        GLsizei h = 0;
+    };
+
     CubismLive2DModel() : CubismUserModel() {
         g_activeModels.push_back(this);
     }
@@ -312,6 +324,8 @@ public:
             spdlog::error("krkrlive2d: failed to create model from moc");
             return false;
         }
+
+        DetectMosaicDrawables(archive);
 
         // Load textures
         csmInt32 texCount = setting_->GetTextureCount();
@@ -472,6 +486,7 @@ public:
         GetModel()->SaveParameters();
         if (_eyeBlink) _eyeBlink->UpdateParameters(GetModel(), dt);
         GetModel()->Update();
+        UpdateMosaicPartOpacity();
 
         GLsizei canvasW = static_cast<GLsizei>(GetModel()->GetCanvasWidthPixel());
         GLsizei canvasH = static_cast<GLsizei>(GetModel()->GetCanvasHeightPixel());
@@ -490,6 +505,7 @@ public:
             renderer->SetMvpMatrix(&projMatrix_);
             renderer->DrawModel();
         }
+        ApplyMosaicPostEffect();
 
         g_live2dRenderTarget = { internalFbo_, fboW_, fboH_ };
 
@@ -541,7 +557,478 @@ public:
 
     bool IsLoaded() const { return loaded_; }
 
+    void SetMosaicSize(float x, float y) {
+        mosaicSizeX_ = x;
+        mosaicSizeY_ = y;
+    }
+
+    bool HasMosaicDrawables() const { return !mosaicDrawableIndices_.empty(); }
+
 private:
+    static bool EqualsAsciiIgnoreCase(const char *lhs, const char *rhs) {
+        if (!lhs || !rhs) return false;
+        while (*lhs && *rhs) {
+            if (std::tolower(static_cast<unsigned char>(*lhs)) !=
+                std::tolower(static_cast<unsigned char>(*rhs)))
+                return false;
+            ++lhs;
+            ++rhs;
+        }
+        return *lhs == '\0' && *rhs == '\0';
+    }
+
+    void DetectMosaicDrawables(const ZipArchive &archive) {
+        mosaicDrawableIndices_.clear();
+        mosaicParentPartIndices_.clear();
+        mosaicParentOpacityDefaults_.clear();
+        mosaicRects_.clear();
+        mosaicCpuScratch_.clear();
+
+        if (GetModel()) {
+            GetModel()->ClearDrawableForceHiddenFlags();
+        }
+        if (!GetModel() || !setting_) return;
+
+        std::string userDataPath;
+        if (setting_->GetUserDataFile()) {
+            csmString s = setting_->GetUserDataFile();
+            userDataPath = s.GetRawString();
+        }
+        if (userDataPath.empty()) userDataPath = baseName_ + ".userdata3.json";
+
+        auto userDataIt = archive.find(userDataPath);
+        if (userDataIt == archive.end()) {
+            const size_t slash = userDataPath.find_last_of("/\\");
+            if (slash != std::string::npos) {
+                userDataIt = archive.find(userDataPath.substr(slash + 1));
+            }
+        }
+        if (userDataIt == archive.end()) return;
+
+        CubismModelUserData *userData = CubismModelUserData::Create(
+            userDataIt->second.data(),
+            static_cast<csmSizeInt>(userDataIt->second.size()));
+        if (!userData) return;
+
+        std::unordered_set<csmInt32> drawableSet;
+        std::unordered_set<csmInt32> partSet;
+        const auto &nodes = userData->GetArtMeshUserDatas();
+        for (csmUint32 i = 0; i < nodes.GetSize(); ++i) {
+            const auto *node = nodes[i];
+            if (!node) continue;
+            if (!EqualsAsciiIgnoreCase(node->Value.GetRawString(), "mosaic")) continue;
+
+            const csmInt32 drawableIndex = GetModel()->GetDrawableIndex(node->TargetId);
+            if (drawableIndex < 0) continue;
+
+            if (drawableSet.insert(drawableIndex).second) {
+                mosaicDrawableIndices_.push_back(drawableIndex);
+            }
+
+            const csmInt32 partIndex =
+                GetModel()->GetDrawableParentPartIndex(static_cast<csmUint32>(drawableIndex));
+            if (partIndex >= 0 && partSet.insert(partIndex).second) {
+                mosaicParentPartIndices_.push_back(partIndex);
+                mosaicParentOpacityDefaults_[partIndex] = GetModel()->GetPartOpacity(partIndex);
+            }
+        }
+
+        CubismModelUserData::Delete(userData);
+
+        if (!mosaicDrawableIndices_.empty()) {
+            spdlog::info("krkrlive2d: detected {} mosaic drawables ({} parent parts) in {}",
+                         static_cast<int>(mosaicDrawableIndices_.size()),
+                         static_cast<int>(mosaicParentPartIndices_.size()),
+                         baseName_);
+        }
+    }
+
+    bool IsMosaicEnabled() const {
+        if (mosaicDrawableIndices_.empty()) return false;
+        const float x = (mosaicSizeX_ > 0.0f) ? mosaicSizeX_ : mosaicSizeY_;
+        const float y = (mosaicSizeY_ > 0.0f) ? mosaicSizeY_ : mosaicSizeX_;
+        return x >= 2.0f || y >= 2.0f;
+    }
+
+    int GetMosaicBlockX() const {
+        float v = (mosaicSizeX_ > 0.0f) ? mosaicSizeX_ : mosaicSizeY_;
+        if (v < 1.0f) v = 1.0f;
+        int iv = static_cast<int>(std::lround(v));
+        if (iv < 1) iv = 1;
+        if (iv > 256) iv = 256;
+        return iv;
+    }
+
+    int GetMosaicBlockY() const {
+        float v = (mosaicSizeY_ > 0.0f) ? mosaicSizeY_ : mosaicSizeX_;
+        if (v < 1.0f) v = 1.0f;
+        int iv = static_cast<int>(std::lround(v));
+        if (iv < 1) iv = 1;
+        if (iv > 256) iv = 256;
+        return iv;
+    }
+
+    void UpdateMosaicPartOpacity() {
+        if (!GetModel()) return;
+        // Mosaic effect is disabled globally; always hide mosaic-tagged overlay meshes.
+        const bool hideSourceMesh = !mosaicEffectEnabled_ || IsMosaicEnabled();
+        for (csmInt32 drawableIndex : mosaicDrawableIndices_) {
+            if (drawableIndex < 0) continue;
+            GetModel()->SetDrawableForceHidden(drawableIndex, hideSourceMesh);
+        }
+
+        if (mosaicParentPartIndices_.empty()) return;
+        for (csmInt32 partIndex : mosaicParentPartIndices_) {
+            if (partIndex < 0) continue;
+            auto it = mosaicParentOpacityDefaults_.find(partIndex);
+            GetModel()->SetPartOpacity(partIndex,
+                                       (it != mosaicParentOpacityDefaults_.end())
+                                           ? it->second
+                                           : 1.0f);
+        }
+    }
+
+    static bool RectsOverlapOrTouch(const MosaicRect &a, const MosaicRect &b, GLint pad) {
+        const GLint ax1 = a.x + a.w + pad;
+        const GLint ay1 = a.y + a.h + pad;
+        const GLint bx1 = b.x + b.w + pad;
+        const GLint by1 = b.y + b.h + pad;
+        return !(ax1 < b.x || bx1 < a.x || ay1 < b.y || by1 < a.y);
+    }
+
+    static MosaicRect MergeRects(const MosaicRect &a, const MosaicRect &b) {
+        const GLint x0 = std::min(a.x, b.x);
+        const GLint y0 = std::min(a.y, b.y);
+        const GLint x1 = std::max(a.x + a.w, b.x + b.w);
+        const GLint y1 = std::max(a.y + a.h, b.y + b.h);
+        MosaicRect r;
+        r.x = x0;
+        r.y = y0;
+        r.w = x1 - x0;
+        r.h = y1 - y0;
+        return r;
+    }
+
+    void CollectMosaicRects() {
+        mosaicRects_.clear();
+        auto *model = GetModel();
+        if (!model || mosaicDrawableIndices_.empty() || fboW_ <= 0 || fboH_ <= 0) return;
+
+        constexpr GLint pad = 2;
+        for (const csmInt32 drawableIndex : mosaicDrawableIndices_) {
+            if (drawableIndex < 0 || drawableIndex >= model->GetDrawableCount()) continue;
+
+            const csmInt32 vertexCount = model->GetDrawableVertexCount(drawableIndex);
+            const Live2D::Cubism::Core::csmVector2 *positions =
+                model->GetDrawableVertexPositions(drawableIndex);
+            if (vertexCount <= 0 || !positions) continue;
+
+            float minX = std::numeric_limits<float>::max();
+            float minY = std::numeric_limits<float>::max();
+            float maxX = std::numeric_limits<float>::lowest();
+            float maxY = std::numeric_limits<float>::lowest();
+
+            for (csmInt32 i = 0; i < vertexCount; ++i) {
+                const float ndcX = projMatrix_.TransformX(positions[i].X);
+                const float ndcY = projMatrix_.TransformY(positions[i].Y);
+                const float px = (ndcX * 0.5f + 0.5f) * static_cast<float>(fboW_);
+                const float py = (ndcY * 0.5f + 0.5f) * static_cast<float>(fboH_);
+                minX = std::min(minX, px);
+                minY = std::min(minY, py);
+                maxX = std::max(maxX, px);
+                maxY = std::max(maxY, py);
+            }
+
+            if (maxX <= minX || maxY <= minY) continue;
+
+            const GLint x0 = std::max<GLint>(0, static_cast<GLint>(std::floor(minX)) - pad);
+            const GLint y0 = std::max<GLint>(0, static_cast<GLint>(std::floor(minY)) - pad);
+            const GLint x1 = std::min<GLint>(fboW_, static_cast<GLint>(std::ceil(maxX)) + pad);
+            const GLint y1 = std::min<GLint>(fboH_, static_cast<GLint>(std::ceil(maxY)) + pad);
+            if (x1 <= x0 || y1 <= y0) continue;
+
+            MosaicRect rect;
+            rect.x = x0;
+            rect.y = y0;
+            rect.w = x1 - x0;
+            rect.h = y1 - y0;
+            mosaicRects_.push_back(rect);
+        }
+
+        // Merge touching/overlapping rects to reduce readback/update count.
+        bool merged = true;
+        while (merged) {
+            merged = false;
+            for (size_t i = 0; i < mosaicRects_.size() && !merged; ++i) {
+                for (size_t j = i + 1; j < mosaicRects_.size(); ++j) {
+                    if (!RectsOverlapOrTouch(mosaicRects_[i], mosaicRects_[j], 2)) continue;
+                    mosaicRects_[i] = MergeRects(mosaicRects_[i], mosaicRects_[j]);
+                    mosaicRects_.erase(mosaicRects_.begin() + j);
+                    merged = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    void EnsureMosaicProgram() {
+        if (mosaicProgram_ || !mosaicGpuEnabled_) return;
+        const char *vs =
+            "#version 100\n"
+            "attribute vec2 a_pos;\n"
+            "varying vec2 v_uv;\n"
+            "void main() {\n"
+            "  gl_Position = vec4(a_pos, 0.0, 1.0);\n"
+            "  v_uv = a_pos * 0.5 + 0.5;\n"
+            "}\n";
+        const char *fs =
+            "#version 100\n"
+            "precision mediump float;\n"
+            "varying vec2 v_uv;\n"
+            "uniform sampler2D u_tex;\n"
+            "uniform vec2 u_texSize;\n"
+            "uniform vec2 u_blockSize;\n"
+            "uniform vec2 u_uvOffset;\n"
+            "uniform vec2 u_uvScale;\n"
+            "void main() {\n"
+            "  vec2 uv = u_uvOffset + v_uv * u_uvScale;\n"
+            "  vec2 block = max(u_blockSize, vec2(1.0));\n"
+            "  vec2 pix = floor((uv * u_texSize) / block) * block + 0.5 * block;\n"
+            "  vec2 suv = clamp(pix / u_texSize, vec2(0.0), vec2(1.0));\n"
+            "  gl_FragColor = texture2D(u_tex, suv);\n"
+            "}\n";
+        GLuint vsh = glCreateShader(GL_VERTEX_SHADER);
+        if (!vsh) {
+            mosaicGpuEnabled_ = false;
+            spdlog::warn("krkrlive2d: disable GPU mosaic (create vertex shader failed)");
+            return;
+        }
+        glShaderSource(vsh, 1, &vs, nullptr);
+        glCompileShader(vsh);
+        GLint vCompiled = GL_FALSE;
+        glGetShaderiv(vsh, GL_COMPILE_STATUS, &vCompiled);
+        GLuint fsh = glCreateShader(GL_FRAGMENT_SHADER);
+        if (!fsh) {
+            glDeleteShader(vsh);
+            mosaicGpuEnabled_ = false;
+            spdlog::warn("krkrlive2d: disable GPU mosaic (create fragment shader failed)");
+            return;
+        }
+        glShaderSource(fsh, 1, &fs, nullptr);
+        glCompileShader(fsh);
+        GLint fCompiled = GL_FALSE;
+        glGetShaderiv(fsh, GL_COMPILE_STATUS, &fCompiled);
+        if (vCompiled != GL_TRUE || fCompiled != GL_TRUE) {
+            glDeleteShader(vsh);
+            glDeleteShader(fsh);
+            mosaicGpuEnabled_ = false;
+            spdlog::warn("krkrlive2d: disable GPU mosaic (shader compile failed)");
+            return;
+        }
+        mosaicProgram_ = glCreateProgram();
+        if (!mosaicProgram_) {
+            glDeleteShader(vsh);
+            glDeleteShader(fsh);
+            mosaicGpuEnabled_ = false;
+            spdlog::warn("krkrlive2d: disable GPU mosaic (create program failed)");
+            return;
+        }
+        glAttachShader(mosaicProgram_, vsh);
+        glAttachShader(mosaicProgram_, fsh);
+        glBindAttribLocation(mosaicProgram_, 0, "a_pos");
+        glLinkProgram(mosaicProgram_);
+        glDeleteShader(vsh);
+        glDeleteShader(fsh);
+        GLint linked = GL_FALSE;
+        glGetProgramiv(mosaicProgram_, GL_LINK_STATUS, &linked);
+        if (linked != GL_TRUE) {
+            glDeleteProgram(mosaicProgram_);
+            mosaicProgram_ = 0;
+            mosaicGpuEnabled_ = false;
+            spdlog::warn("krkrlive2d: disable GPU mosaic (program link failed)");
+            return;
+        }
+        mosaicLocPos_ = glGetAttribLocation(mosaicProgram_, "a_pos");
+        mosaicLocTex_ = glGetUniformLocation(mosaicProgram_, "u_tex");
+        mosaicLocTexSize_ = glGetUniformLocation(mosaicProgram_, "u_texSize");
+        mosaicLocBlock_ = glGetUniformLocation(mosaicProgram_, "u_blockSize");
+        mosaicLocUvOffset_ = glGetUniformLocation(mosaicProgram_, "u_uvOffset");
+        mosaicLocUvScale_ = glGetUniformLocation(mosaicProgram_, "u_uvScale");
+        if (mosaicLocPos_ < 0 || mosaicLocTex_ < 0 || mosaicLocTexSize_ < 0 ||
+            mosaicLocBlock_ < 0 || mosaicLocUvOffset_ < 0 || mosaicLocUvScale_ < 0) {
+            glDeleteProgram(mosaicProgram_);
+            mosaicProgram_ = 0;
+            mosaicGpuEnabled_ = false;
+            spdlog::warn("krkrlive2d: disable GPU mosaic (uniform/attrib lookup failed)");
+        }
+    }
+
+    void EnsureMosaicSourceTexture(GLsizei w, GLsizei h) {
+        if (w <= 0 || h <= 0 || !mosaicGpuEnabled_) return;
+        if (!mosaicSrcTex_) glGenTextures(1, &mosaicSrcTex_);
+        if (!mosaicSrcTex_) {
+            mosaicGpuEnabled_ = false;
+            spdlog::warn("krkrlive2d: disable GPU mosaic (create source texture failed)");
+            return;
+        }
+        glBindTexture(GL_TEXTURE_2D, mosaicSrcTex_);
+        if (mosaicTexW_ != w || mosaicTexH_ != h) {
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0,
+                         GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+            mosaicTexW_ = w;
+            mosaicTexH_ = h;
+        }
+        if (glGetError() != GL_NO_ERROR) {
+            glBindTexture(GL_TEXTURE_2D, 0);
+            glDeleteTextures(1, &mosaicSrcTex_);
+            mosaicSrcTex_ = 0;
+            mosaicTexW_ = mosaicTexH_ = 0;
+            mosaicGpuEnabled_ = false;
+            spdlog::warn("krkrlive2d: disable GPU mosaic (source texture upload failed)");
+            return;
+        }
+        glBindTexture(GL_TEXTURE_2D, 0);
+    }
+
+    bool ApplyMosaicPostEffectGPU() {
+        if (!mosaicGpuEnabled_) return false;
+        EnsureMosaicProgram();
+        EnsureMosaicSourceTexture(fboW_, fboH_);
+        if (!mosaicProgram_ || !mosaicSrcTex_) return false;
+
+        while (glGetError() != GL_NO_ERROR) {}
+        glBindFramebuffer(GL_FRAMEBUFFER, internalFbo_);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, mosaicSrcTex_);
+        glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, fboW_, fboH_);
+        if (glGetError() != GL_NO_ERROR) {
+            glBindTexture(GL_TEXTURE_2D, 0);
+            glUseProgram(0);
+            if (mosaicProgram_) { glDeleteProgram(mosaicProgram_); mosaicProgram_ = 0; }
+            if (mosaicSrcTex_) { glDeleteTextures(1, &mosaicSrcTex_); mosaicSrcTex_ = 0; }
+            mosaicTexW_ = mosaicTexH_ = 0;
+            mosaicGpuEnabled_ = false;
+            spdlog::warn("krkrlive2d: GPU mosaic failed at copy stage, switching to CPU");
+            return false;
+        }
+
+        glUseProgram(mosaicProgram_);
+        glUniform1i(mosaicLocTex_, 0);
+        glUniform2f(mosaicLocTexSize_, static_cast<float>(fboW_), static_cast<float>(fboH_));
+        glUniform2f(mosaicLocBlock_, static_cast<float>(GetMosaicBlockX()),
+                    static_cast<float>(GetMosaicBlockY()));
+
+        glDisable(GL_BLEND);
+        glDisable(GL_DEPTH_TEST);
+        glDepthMask(GL_FALSE);
+
+        static const float quad[] = { -1.f, -1.f, 1.f, -1.f, -1.f, 1.f, 1.f, 1.f };
+        glEnableVertexAttribArray(mosaicLocPos_);
+        glVertexAttribPointer(mosaicLocPos_, 2, GL_FLOAT, GL_FALSE, 0, quad);
+
+        for (const auto &rect : mosaicRects_) {
+            if (rect.w <= 0 || rect.h <= 0) continue;
+            glViewport(rect.x, rect.y, rect.w, rect.h);
+            const float uvOffsetX = static_cast<float>(rect.x) / static_cast<float>(fboW_);
+            const float uvOffsetY = static_cast<float>(rect.y) / static_cast<float>(fboH_);
+            const float uvScaleX = static_cast<float>(rect.w) / static_cast<float>(fboW_);
+            const float uvScaleY = static_cast<float>(rect.h) / static_cast<float>(fboH_);
+            glUniform2f(mosaicLocUvOffset_, uvOffsetX, uvOffsetY);
+            glUniform2f(mosaicLocUvScale_, uvScaleX, uvScaleY);
+            glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+        }
+
+        const bool ok = (glGetError() == GL_NO_ERROR);
+        glDisableVertexAttribArray(mosaicLocPos_);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        glUseProgram(0);
+        if (!ok) {
+            if (mosaicProgram_) { glDeleteProgram(mosaicProgram_); mosaicProgram_ = 0; }
+            if (mosaicSrcTex_) { glDeleteTextures(1, &mosaicSrcTex_); mosaicSrcTex_ = 0; }
+            mosaicTexW_ = mosaicTexH_ = 0;
+            mosaicGpuEnabled_ = false;
+            spdlog::warn("krkrlive2d: GPU mosaic failed at draw stage, switching to CPU");
+        }
+        return ok;
+    }
+
+    void ApplyMosaicPostEffectCPU() {
+        if (!internalFbo_ || !fboTex_) return;
+
+        const int blockX = GetMosaicBlockX();
+        const int blockY = GetMosaicBlockY();
+        if (blockX <= 1 && blockY <= 1) return;
+
+        GLint prevPack = 4;
+        GLint prevUnpack = 4;
+        glGetIntegerv(GL_PACK_ALIGNMENT, &prevPack);
+        glGetIntegerv(GL_UNPACK_ALIGNMENT, &prevUnpack);
+        glPixelStorei(GL_PACK_ALIGNMENT, 1);
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+        glBindTexture(GL_TEXTURE_2D, fboTex_);
+
+        for (const auto &rect : mosaicRects_) {
+            if (rect.w <= 0 || rect.h <= 0) continue;
+
+            const size_t pixCount = static_cast<size_t>(rect.w) * static_cast<size_t>(rect.h);
+            const size_t byteCount = pixCount * 4u;
+            if (mosaicCpuScratch_.size() < byteCount) mosaicCpuScratch_.resize(byteCount);
+
+            uint8_t *buf = mosaicCpuScratch_.data();
+            glReadPixels(rect.x, rect.y, rect.w, rect.h, GL_RGBA, GL_UNSIGNED_BYTE, buf);
+            if (glGetError() != GL_NO_ERROR) continue;
+
+            for (int by = 0; by < rect.h; by += blockY) {
+                const int sampleY = by;
+                const int yMax = std::min(by + blockY, static_cast<int>(rect.h));
+                for (int bx = 0; bx < rect.w; bx += blockX) {
+                    const int sampleX = bx;
+                    const int xMax = std::min(bx + blockX, static_cast<int>(rect.w));
+                    const size_t sidx =
+                        (static_cast<size_t>(sampleY) * static_cast<size_t>(rect.w) +
+                         static_cast<size_t>(sampleX)) * 4u;
+                    const uint8_t r = buf[sidx + 0];
+                    const uint8_t g = buf[sidx + 1];
+                    const uint8_t b = buf[sidx + 2];
+                    const uint8_t a = buf[sidx + 3];
+
+                    for (int y = by; y < yMax; ++y) {
+                        const size_t row = static_cast<size_t>(y) * static_cast<size_t>(rect.w);
+                        for (int x = bx; x < xMax; ++x) {
+                            const size_t didx = (row + static_cast<size_t>(x)) * 4u;
+                            buf[didx + 0] = r;
+                            buf[didx + 1] = g;
+                            buf[didx + 2] = b;
+                            buf[didx + 3] = a;
+                        }
+                    }
+                }
+            }
+
+            glTexSubImage2D(GL_TEXTURE_2D, 0, rect.x, rect.y, rect.w, rect.h,
+                            GL_RGBA, GL_UNSIGNED_BYTE, buf);
+        }
+
+        glBindTexture(GL_TEXTURE_2D, 0);
+        glPixelStorei(GL_PACK_ALIGNMENT, prevPack);
+        glPixelStorei(GL_UNPACK_ALIGNMENT, prevUnpack);
+    }
+
+    void ApplyMosaicPostEffect() {
+        if (!mosaicEffectEnabled_) return;
+        if (!IsMosaicEnabled() || !internalFbo_ || !fboTex_) return;
+        CollectMosaicRects();
+        if (mosaicRects_.empty()) return;
+
+        if (!ApplyMosaicPostEffectGPU()) {
+            ApplyMosaicPostEffectCPU();
+        }
+    }
+
     void ReleaseTextures() {
         for (auto texId : textureIds_) {
             if (texId) glDeleteTextures(1, &texId);
@@ -575,6 +1062,9 @@ private:
     }
 
     void DestroyInternalFBO() {
+        if (mosaicProgram_) { glDeleteProgram(mosaicProgram_); mosaicProgram_ = 0; }
+        if (mosaicSrcTex_) { glDeleteTextures(1, &mosaicSrcTex_); mosaicSrcTex_ = 0; }
+        mosaicTexW_ = mosaicTexH_ = 0;
         if (blitProgram_) { glDeleteProgram(blitProgram_); blitProgram_ = 0; }
         if (fboTex_) { glDeleteTextures(1, &fboTex_); fboTex_ = 0; }
         if (internalFbo_) { glDeleteFramebuffers(1, &internalFbo_); internalFbo_ = 0; }
@@ -669,6 +1159,12 @@ private:
     std::unordered_map<std::string, ACubismMotion *> motions_;
     csmVector<const CubismId *> _eyeBlinkIds;
     csmVector<const CubismId *> _lipSyncIds;
+    std::vector<csmInt32> mosaicDrawableIndices_;
+    std::vector<csmInt32> mosaicParentPartIndices_;
+    std::unordered_map<csmInt32, csmFloat32> mosaicParentOpacityDefaults_;
+    std::vector<MosaicRect> mosaicRects_;
+    float mosaicSizeX_ = 24.0f;
+    float mosaicSizeY_ = 24.0f;
 
     GLuint internalFbo_ = 0;
     GLuint fboTex_ = 0;
@@ -676,6 +1172,15 @@ private:
     GLsizei fboH_ = 0;
     GLuint blitProgram_ = 0;
     GLint locPos_ = 0, locTex_ = 0, locScale_ = 0, locFlipY_ = -1;
+    GLuint mosaicProgram_ = 0;
+    GLint mosaicLocPos_ = 0, mosaicLocTex_ = -1;
+    GLint mosaicLocTexSize_ = -1, mosaicLocBlock_ = -1;
+    GLint mosaicLocUvOffset_ = -1, mosaicLocUvScale_ = -1;
+    GLuint mosaicSrcTex_ = 0;
+    GLsizei mosaicTexW_ = 0, mosaicTexH_ = 0;
+    bool mosaicGpuEnabled_ = true;
+    bool mosaicEffectEnabled_ = false;
+    std::vector<uint8_t> mosaicCpuScratch_;
     std::chrono::steady_clock::time_point lastUpdateTime_;
 };
 
@@ -844,6 +1349,8 @@ public:
             if (r) *r = false;
         return TJS_S_OK;
     }
+        s->cubismModel_->SetMosaicSize(static_cast<float>(s->mosaicX_),
+                                       static_cast<float>(s->mosaicY_));
 
         s->loaded_ = true;
         s->progress_ = 1.0;
@@ -945,6 +1452,10 @@ public:
         if (!s || !p) return TJS_S_OK;
         if (n > 0) s->mosaicX_ = ToReal(*p[0], s->mosaicX_);
         if (n > 1) s->mosaicY_ = ToReal(*p[1], s->mosaicY_);
+        if (s->cubismModel_) {
+            s->cubismModel_->SetMosaicSize(static_cast<float>(s->mosaicX_),
+                                           static_cast<float>(s->mosaicY_));
+        }
         return TJS_S_OK;
     }
 
@@ -1246,8 +1757,9 @@ public:
         return TJS_S_OK;
     }
 
-    static tjs_error isMosaicModelCb(tTJSVariant *r, tjs_int, tTJSVariant **, Live2DModel *) {
-        if (r) *r = false; return TJS_S_OK;
+    static tjs_error isMosaicModelCb(tTJSVariant *r, tjs_int, tTJSVariant **, Live2DModel *s) {
+        if (r) *r = (s && s->cubismModel_ && s->cubismModel_->HasMosaicDrawables());
+        return TJS_S_OK;
     }
 
     static tjs_error reloadCb(tTJSVariant *r, tjs_int, tTJSVariant **, Live2DModel *) {
@@ -1289,7 +1801,7 @@ private:
     tjs_int voiceMode_ = 0;
     tjs_real blinkingInterval_ = 0.0;
     tjs_int blinkingMode_ = 0;
-    tjs_real mosaicX_ = 0.0, mosaicY_ = 0.0;
+    tjs_real mosaicX_ = 24.0, mosaicY_ = 24.0;
     tjs_real partFadeTime_ = 0.0;
     tjs_real progress_ = 0.0;
     tjs_int renderWidth_ = 1920, renderHeight_ = 1080;
