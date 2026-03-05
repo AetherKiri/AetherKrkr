@@ -598,7 +598,7 @@ private:
             "varying vec2 v_uv;\n"
             "void main() {\n"
             "  gl_Position = vec4(a_pos * u_scale, 0.0, 1.0);\n"
-            "  v_uv = a_pos * 0.5 + 0.5;\n"
+            "  v_uv = vec2(a_pos.x * 0.5 + 0.5, -a_pos.y * 0.5 + 0.5);\n"
             "}\n";
         const char *fs =
             "#version 100\n"

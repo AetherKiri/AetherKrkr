@@ -1008,7 +1008,7 @@ static bool CopyFBOToLayerGPU(GLuint srcFbo, GLsizei srcW, GLsizei srcH,
     GLsizei blitH = (layerH < srcH) ? layerH : srcH;
 
     glBlitFramebuffer(0, 0, blitW, blitH,
-                      0, 0, blitW, blitH,
+                      0, blitH, blitW, 0,
                       GL_COLOR_BUFFER_BIT, GL_NEAREST);
 
     glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(prevFbo));
