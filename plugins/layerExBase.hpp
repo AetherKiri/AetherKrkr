@@ -6,7 +6,8 @@
 #include "ScriptMgnIntf.h"
 
 /**
- * プロパティのキャッシュ処理用
+ * TJS property cache helper.
+ * Retained for backward compatibility (used by Windows LayerExDraw).
  */
 struct ObjectCache {
     typedef iTJSDispatch2 *DispatchT;
@@ -55,7 +56,7 @@ struct ObjectCache {
     inline void SetValue(int n) const {
         VariantT var = n;
         if(TJS_FAILED(_cache->PropSet(0, 0, 0, &var, _obj)))
-            _Exception(TJS_W("FAILED: get property value :"));
+            _Exception(TJS_W("FAILED: set property value :"));
     }
 
 private:
@@ -66,7 +67,7 @@ private:
 };
 
 /**
- * レイヤ拡張処理のベース
+ * Layer extension base — uses direct native C++ calls instead of TJS dispatch.
  */
 struct layerExBase {
     typedef iTJSDispatch2 *DispatchT;
@@ -76,59 +77,42 @@ struct layerExBase {
     typedef tjs_int PitchT;
     typedef tjs_int GeometryT;
     DispatchT _obj;
+    tTJSNI_Layer *_this;
 
-    /**
-     * コンストラクタ
-     */
     layerExBase(DispatchT obj) :
-        _obj(obj), _pWidth(obj, TJS_W("imageWidth")),
-        _pHeight(obj, TJS_W("imageHeight")),
-        _pBuffer(obj, TJS_W("mainImageBufferForWrite")),
-        _pPitch(obj, TJS_W("mainImageBufferPitch")),
-        _pUpdate(obj, TJS_W("update")), _pClipLeft(obj, TJS_W("clipLeft")),
-        _pClipTop(obj, TJS_W("clipTop")), _pClipWidth(obj, TJS_W("clipWidth")),
-        _pClipHeight(obj, TJS_W("clipHeight")), _width(0), _height(0),
-        _pitch(0), _buffer(nullptr), _clipLeft(0), _clipTop(0), _clipWidth(0),
-        _clipHeight(0) {}
-
-    /**
-     * デストラクタ
-     */
-    virtual ~layerExBase() = default;
-
-    /**
-     * 再描画指定
-     */
-    virtual void redraw() {
-        tTJSVariant vars[4] = { _pClipLeft, _pClipTop, _pClipWidth,
-                                _pClipHeight };
-        tTJSVariant *varsp[4] = { vars, vars + 1, vars + 2, vars + 3 };
-        _pUpdate(4, varsp);
+        _obj(obj), _this(nullptr),
+        _width(0), _height(0), _pitch(0), _buffer(nullptr),
+        _clipLeft(0), _clipTop(0), _clipWidth(0), _clipHeight(0) {
+        tjs_error hr = obj->NativeInstanceSupport(TJS_NIS_GETINSTANCE,
+            tTJSNC_Layer::ClassID, (iTJSNativeInstance **)&_this);
+        if(TJS_FAILED(hr))
+            TVPThrowExceptionMessage(TJS_W("Not Layer"));
     }
 
-    /**
-     * 情報更新
-     */
+    virtual ~layerExBase() = default;
+
+    virtual void redraw() {
+        tTVPRect rc(_clipLeft, _clipTop,
+                    _clipLeft + _clipWidth, _clipTop + _clipHeight);
+        _this->Update(rc);
+    }
+
     virtual void reset() {
-        _width = (GeometryT)_pWidth;
-        _height = (GeometryT)_pHeight;
-        _buffer = (BufferT)(ObjectCache::IntegerT)_pBuffer;
-        _pitch = (PitchT)_pPitch;
-        _clipLeft = (GeometryT)_pClipLeft;
-        _clipTop = (GeometryT)_pClipTop;
-        _clipWidth = (GeometryT)_pClipWidth;
-        _clipHeight = (GeometryT)_pClipHeight;
+        _width  = (GeometryT)_this->GetWidth();
+        _height = (GeometryT)_this->GetHeight();
+        _buffer = (BufferT)_this->GetMainImagePixelBufferForWrite();
+        _pitch  = (PitchT)_this->GetMainImagePixelBufferPitch();
+        _clipLeft   = (GeometryT)_this->GetClipLeft();
+        _clipTop    = (GeometryT)_this->GetClipTop();
+        _clipWidth  = (GeometryT)_this->GetClipWidth();
+        _clipHeight = (GeometryT)_this->GetClipHeight();
     }
 
 protected:
-    ObjectT _pWidth, _pHeight, _pBuffer, _pPitch, _pUpdate;
-
     GeometryT _width, _height;
     BufferT _buffer;
     PitchT _pitch;
 
-    // クリップ情報
-    ObjectT _pClipLeft, _pClipTop, _pClipWidth, _pClipHeight;
     GeometryT _clipLeft, _clipTop, _clipWidth, _clipHeight;
 };
 
@@ -137,7 +121,6 @@ struct layerExBase_GL {
     typedef tjs_int GeometryT;
     typedef tjs_int PitchT;
     typedef unsigned char *BufferT;
-    //    typedef unsigned char *BufferRT;
 
     tTJSNI_Layer *_this;
 
@@ -145,7 +128,6 @@ struct layerExBase_GL {
     BufferT _buffer;
     PitchT _pitch;
 
-    // ･ｯ･・ﾃ･ﾗﾇ驤・
     GeometryT _clipLeft, _clipTop, _clipWidth, _clipHeight;
     DispatchT _obj;
 
