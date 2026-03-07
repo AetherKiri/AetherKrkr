@@ -9,7 +9,6 @@
 // Wave Player interface
 //---------------------------------------------------------------------------
 #include "tjsCommHead.h"
-
 #include <algorithm>
 #include "WaveIntf.h"
 #include "EventIntf.h"
@@ -926,7 +925,6 @@ void tTJSNI_BaseWaveSoundBuffer::RebuildFilterChain() {
     tjs_int count = 0;
     Filters->PropGet(0, TJS_W("count"), nullptr, &v, Filters);
     count = v;
-
     // reset filter output
     FilterOutput = LoopManager;
 
@@ -938,10 +936,14 @@ void tTJSNI_BaseWaveSoundBuffer::RebuildFilterChain() {
         tTJSVariantClosure clo = v.AsObjectClosureNoAddRef();
         tTJSVariant iface_v;
         if(TJS_FAILED(
-               clo.PropGet(0, TJS_W("interface"), nullptr, &iface_v, nullptr)))
+               clo.PropGet(0, TJS_W("interface"), nullptr, &iface_v, nullptr))) {
             continue;
+        }
         iTVPBasicWaveFilter *filter = reinterpret_cast<iTVPBasicWaveFilter *>(
             (tjs_intptr_t)(tjs_int64)iface_v);
+        if(!filter) {
+            continue;
+        }
         // save to the backupped array
         FilterInterfaces.emplace_back(v, filter);
     }
