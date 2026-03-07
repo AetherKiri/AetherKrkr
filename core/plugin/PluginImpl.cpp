@@ -48,6 +48,171 @@ bool TVPRegisterGlobalObject(const tjs_char *name, iTJSDispatch2 *dsp);
 
 static iTJSDispatch2 *s_ProxyStorageMap = nullptr;
 
+class tTJSNI_GamepadStub : public tTJSNativeInstance {
+public:
+    tjs_error Construct(tjs_int, tTJSVariant **, iTJSDispatch2 *) override {
+        return TJS_S_OK;
+    }
+
+    void Invalidate() override {}
+};
+
+class tTJSNC_GamepadStub : public tTJSNativeClass {
+public:
+    static tjs_uint32 ClassID;
+
+    tTJSNC_GamepadStub() : tTJSNativeClass(TJS_W("GamepadPort")) {
+        TJS_BEGIN_NATIVE_MEMBERS(GamepadPort)
+        TJS_DECL_EMPTY_FINALIZE_METHOD
+
+        TJS_BEGIN_NATIVE_CONSTRUCTOR_DECL(
+            _this, tTJSNI_GamepadStub, GamepadPort) {
+            return TJS_S_OK;
+        }
+        TJS_END_NATIVE_CONSTRUCTOR_DECL(GamepadPort)
+
+        TJS_BEGIN_NATIVE_METHOD_DECL(update) { return TJS_S_OK; }
+        TJS_END_NATIVE_METHOD_DECL(update)
+
+        TJS_BEGIN_NATIVE_METHOD_DECL(initialize) {
+            if(result)
+                *result = 1;
+            return TJS_S_OK;
+        }
+        TJS_END_NATIVE_METHOD_DECL(initialize)
+
+        TJS_BEGIN_NATIVE_METHOD_DECL(refresh) { return TJS_S_OK; }
+        TJS_END_NATIVE_METHOD_DECL(refresh)
+
+        TJS_BEGIN_NATIVE_METHOD_DECL(remove) { return TJS_S_OK; }
+        TJS_END_NATIVE_METHOD_DECL(remove)
+
+        TJS_BEGIN_NATIVE_METHOD_DECL(rebind) { return TJS_S_OK; }
+        TJS_END_NATIVE_METHOD_DECL(rebind)
+
+        TJS_BEGIN_NATIVE_METHOD_DECL(reDetect) { return TJS_S_OK; }
+        TJS_END_NATIVE_METHOD_DECL(reDetect)
+
+        TJS_BEGIN_NATIVE_METHOD_DECL(createInputDevice) {
+            if(result)
+                *result = 0;
+            return TJS_S_OK;
+        }
+        TJS_END_NATIVE_METHOD_DECL(createInputDevice)
+
+        TJS_BEGIN_NATIVE_METHOD_DECL(getPadKeyState) {
+            if(result)
+                *result = 0;
+            return TJS_S_OK;
+        }
+        TJS_END_NATIVE_METHOD_DECL(getPadKeyState)
+
+        TJS_BEGIN_NATIVE_METHOD_DECL(getButtonState) {
+            if(result)
+                *result = 0;
+            return TJS_S_OK;
+        }
+        TJS_END_NATIVE_METHOD_DECL(getButtonState)
+
+        TJS_BEGIN_NATIVE_METHOD_DECL(getAxisState) {
+            if(result)
+                *result = 0.0;
+            return TJS_S_OK;
+        }
+        TJS_END_NATIVE_METHOD_DECL(getAxisState)
+
+        TJS_BEGIN_NATIVE_METHOD_DECL(getCount) {
+            if(result)
+                *result = 0;
+            return TJS_S_OK;
+        }
+        TJS_END_NATIVE_METHOD_DECL(getCount)
+
+        TJS_BEGIN_NATIVE_PROP_DECL(count) {
+            TJS_BEGIN_NATIVE_PROP_GETTER {
+                *result = 0;
+                return TJS_S_OK;
+            }
+            TJS_END_NATIVE_PROP_GETTER
+            TJS_DENY_NATIVE_PROP_SETTER
+        }
+        TJS_END_NATIVE_PROP_DECL(count)
+
+        TJS_BEGIN_NATIVE_PROP_DECL(port) {
+            TJS_BEGIN_NATIVE_PROP_GETTER {
+                *result = 0;
+                return TJS_S_OK;
+            }
+            TJS_END_NATIVE_PROP_GETTER
+            TJS_BEGIN_NATIVE_PROP_SETTER { return TJS_S_OK; }
+            TJS_END_NATIVE_PROP_SETTER
+        }
+        TJS_END_NATIVE_PROP_DECL(port)
+
+        TJS_BEGIN_NATIVE_PROP_DECL(portIndex) {
+            TJS_BEGIN_NATIVE_PROP_GETTER {
+                *result = 0;
+                return TJS_S_OK;
+            }
+            TJS_END_NATIVE_PROP_GETTER
+            TJS_BEGIN_NATIVE_PROP_SETTER { return TJS_S_OK; }
+            TJS_END_NATIVE_PROP_SETTER
+        }
+        TJS_END_NATIVE_PROP_DECL(portIndex)
+
+        TJS_BEGIN_NATIVE_PROP_DECL(enabled) {
+            TJS_BEGIN_NATIVE_PROP_GETTER {
+                *result = 0;
+                return TJS_S_OK;
+            }
+            TJS_END_NATIVE_PROP_GETTER
+            TJS_BEGIN_NATIVE_PROP_SETTER { return TJS_S_OK; }
+            TJS_END_NATIVE_PROP_SETTER
+        }
+        TJS_END_NATIVE_PROP_DECL(enabled)
+
+        TJS_BEGIN_NATIVE_PROP_DECL(connected) {
+            TJS_BEGIN_NATIVE_PROP_GETTER {
+                *result = 0;
+                return TJS_S_OK;
+            }
+            TJS_END_NATIVE_PROP_GETTER
+            TJS_DENY_NATIVE_PROP_SETTER
+        }
+        TJS_END_NATIVE_PROP_DECL(connected)
+
+        TJS_BEGIN_NATIVE_PROP_DECL(name) {
+            TJS_BEGIN_NATIVE_PROP_GETTER {
+                *result = TJS_W("");
+                return TJS_S_OK;
+            }
+            TJS_END_NATIVE_PROP_GETTER
+            TJS_DENY_NATIVE_PROP_SETTER
+        }
+        TJS_END_NATIVE_PROP_DECL(name)
+
+        TJS_BEGIN_NATIVE_PROP_DECL(HWND) {
+            TJS_BEGIN_NATIVE_PROP_GETTER {
+                *result = static_cast<tjs_int64>(0);
+                return TJS_S_OK;
+            }
+            TJS_END_NATIVE_PROP_GETTER
+            TJS_BEGIN_NATIVE_PROP_SETTER { return TJS_S_OK; }
+            TJS_END_NATIVE_PROP_SETTER
+        }
+        TJS_END_NATIVE_PROP_DECL(HWND)
+
+        TJS_END_NATIVE_MEMBERS
+    }
+
+protected:
+    tTJSNativeInstance *CreateNativeInstance() override {
+        return new tTJSNI_GamepadStub();
+    }
+};
+
+tjs_uint32 tTJSNC_GamepadStub::ClassID = static_cast<tjs_uint32>(-1);
+
 class tTVPProxyStorageMedia : public iTVPStorageMedia {
     tjs_uint RefCount = 1;
 
@@ -106,6 +271,34 @@ static void TVPRegisterProxyFsStub() {
     spdlog::info("Registered proxy storage media stub for missing proxyfs.dll");
 }
 
+// gamepad.dll 未实现时注册 stub，避免 exgamepad.tjs 访问 GamepadPort 报错（逆向见：global["GamepadPort"]/["Gamepad"]，脚本用 SystemConfig.GamepadPort）
+static void TVPRegisterGamepadStub() {
+    iTJSDispatch2 *stub = new tTJSNC_GamepadStub();
+    if(!stub)
+        return;
+
+    iTJSDispatch2 *global = TVPGetScriptDispatch();
+    if(!global) {
+        stub->Release();
+        return;
+    }
+
+    tTJSVariant val(stub);
+    global->PropSet(TJS_MEMBERENSURE, TJS_W("GamepadPort"), nullptr, &val, global);
+    global->PropSet(TJS_MEMBERENSURE, TJS_W("Gamepad"), nullptr, &val, global);
+
+    tTJSVariant configVar;
+    if(global->PropGet(0, TJS_W("SystemConfig"), nullptr, &configVar, global) == TJS_S_OK &&
+       configVar.Type() == tvtObject && configVar.AsObjectNoAddRef()) {
+        configVar.AsObjectNoAddRef()->PropSet(TJS_MEMBERENSURE, TJS_W("GamepadPort"), nullptr, &val,
+                                              configVar.AsObjectNoAddRef());
+    }
+
+    global->Release();
+    stub->Release();
+    spdlog::info("Registered GamepadPort/Gamepad stub for missing gamepad.dll");
+}
+
 void TVPLoadPlugin(const ttstr &name) {
     auto pluginName = name;
     if(name == TJS_W("emoteplayer.dll"))
@@ -117,6 +310,8 @@ void TVPLoadPlugin(const ttstr &name) {
         spdlog::error("Loading Plugin: {} Failed", name.AsStdString());
         if(name == TJS_W("proxyfs.dll")) {
             TVPRegisterProxyFsStub();
+        } else if(name == TJS_W("gamepad.dll")) {
+            TVPRegisterGamepadStub();
         }
     }
 }
