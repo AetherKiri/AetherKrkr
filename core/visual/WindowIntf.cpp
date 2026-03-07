@@ -275,8 +275,30 @@ void tTJSNI_BaseWindow::SetDrawDeviceObject(const tTJSVariant &val) {
             TVPConsoleLog(TJS_W("DrawDevice is same do need not to change"));
             return;
         }
+        bool preserveExistingDrawDevice = false;
+        if(DrawDeviceObject.Type() == tvtObject) {
+            tTJSVariant captureMethod;
+            if(TJS_SUCCEEDED(clo.PropGet(TJS_IGNOREPROP,
+                                         TJS_W("__captureBaseDrawDevice"),
+                                         nullptr, &captureMethod, nullptr)) &&
+               captureMethod.Type() == tvtObject) {
+                tTJSVariantClosure captureClosure =
+                    captureMethod.AsObjectClosureNoAddRef();
+                if(captureClosure.Object) {
+                    tTJSVariant arg = DrawDeviceObject;
+                    tTJSVariant *args[1] = { &arg };
+                    tTJSVariant captureResult;
+                    if(TJS_SUCCEEDED(captureClosure.FuncCall(
+                           0, nullptr, nullptr, &captureResult, 1, args,
+                           val.AsObjectNoAddRef()))) {
+                        preserveExistingDrawDevice =
+                            static_cast<tjs_int>(captureResult) != 0;
+                    }
+                }
+            }
+        }
         // invalidate existing draw device
-        if(DrawDeviceObject.Type() == tvtObject)
+        if(DrawDeviceObject.Type() == tvtObject && !preserveExistingDrawDevice)
             DrawDeviceObject.AsObjectClosureNoAddRef().Invalidate(
                 0, nullptr, nullptr, DrawDeviceObject.AsObjectNoAddRef());
 

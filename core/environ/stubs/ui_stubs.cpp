@@ -86,6 +86,9 @@ public:
         auto* dd = owner_->GetDrawDevice();
         if (!dd) return;
 
+        width_ = w;
+        height_ = h;
+
         auto& egl = krkr::GetEngineEGLContext();
         tjs_int surf_w = egl.IsValid() ? static_cast<tjs_int>(egl.GetWidth())  : w;
         tjs_int surf_h = egl.IsValid() ? static_cast<tjs_int>(egl.GetHeight()) : h;

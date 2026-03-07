@@ -30,6 +30,9 @@ target_sources(${PROJECT_NAME} PUBLIC
     layerExLongExposure.cpp
     krkrlive2d.cpp
     krkrgles.cpp
+    drawDeviceD2DCompat.cpp
+    wfBasicEffectCompat.cpp
+    wfTypicalDSPCompat.cpp
 )
 
 target_include_directories(${PROJECT_NAME} PUBLIC
