@@ -238,13 +238,12 @@ namespace TJS {
                         TJS constructor
                     */
 
-                    if(numparams >=
-                       1){ tTJSNC_RegExp::Compile(numparams, param, _this);
-} // namespace TJS
+                    if(numparams >= 1)
+                        tTJSNC_RegExp::Compile(numparams, param, _this);
 
-return TJS_S_OK;
-}
-TJS_END_NATIVE_CONSTRUCTOR_DECL(/*TJS class name*/ RegExp)
+                    return TJS_S_OK;
+                }
+                TJS_END_NATIVE_CONSTRUCTOR_DECL(/*TJS class name*/ RegExp)
 //----------------------------------------------------------------------
 TJS_BEGIN_NATIVE_METHOD_DECL(/*func. name*/ compile) {
     TJS_GET_NATIVE_INSTANCE(/*var. name*/ _this,
