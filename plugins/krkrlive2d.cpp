@@ -1476,8 +1476,8 @@ public:
     static tjs_error setExpressionCb(tTJSVariant *r, tjs_int n, tTJSVariant **p, Live2DModel *s) {
         if (s && n > 0 && p) s->expression_ = ToTTStr(*p[0]);
         if (r) *r = true;
-            return TJS_S_OK;
-        }
+        return TJS_S_OK;
+    }
 
     static tjs_error getExpressionCb(tTJSVariant *r, tjs_int, tTJSVariant **, Live2DModel *s) {
         if (r && s) *r = s->expression_;
@@ -1601,8 +1601,8 @@ public:
                     idx, static_cast<csmFloat32>(ToReal(*p[1], 0.0)));
         }
         s->parameterValues_[ToKey(*p[0])] = ToReal(*p[1], 0.0);
-            return TJS_S_OK;
-        }
+        return TJS_S_OK;
+    }
 
     static tjs_error setParameterTypeCb(tTJSVariant *, tjs_int n, tTJSVariant **p, Live2DModel *s) {
         if (s && p && n > 1) s->parameterTypes_[ToKey(*p[0])] = ToInt(*p[1], 0);

@@ -473,7 +473,6 @@ namespace TJS {
     //---------------------------------------------------------------------------
 
     class tTJSVariant : protected tTJSVariant_S {
-
         //---- object management
         //------------------------------------------------
     private:

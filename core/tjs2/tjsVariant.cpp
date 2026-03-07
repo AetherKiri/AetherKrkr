@@ -15,7 +15,6 @@
 #include "tjsLex.h"
 #include "tjsUtils.h"
 #include "tjsDebug.h"
-
 namespace TJS {
     //---------------------------------------------------------------------------
     // tTJSVariantOctet related
