@@ -477,6 +477,25 @@ TJS_BEGIN_NATIVE_METHOD_DECL(/*func. name*/ replace) {
 }
 TJS_END_NATIVE_METHOD_DECL(/*func. name*/ replace)
 //----------------------------------------------------------------------
+TJS_BEGIN_NATIVE_METHOD_DECL(/*func. name*/ replace_alias) {
+    TJS_GET_NATIVE_INSTANCE(/*var. name*/ _this,
+                            /*var. type*/ tTJSNI_RegExp);
+
+    if(numparams < 2)
+        return TJS_E_BADPARAMCOUNT;
+
+    ttstr res;
+    replace_regex(param, numparams, _this, objthis, res);
+    if(result)
+        *result = res;
+
+    return TJS_S_OK;
+}
+TJS_END_NATIVE_METHOD_DECL_INT
+TJSNativeClassRegisterNCM(TJS_NCM_REG_THIS, TJS_W("replace"),
+                          TJSCreateNativeClassMethod(NCM_replace_alias::Process),
+                          __classname, nitMethod);
+//----------------------------------------------------------------------
 TJS_BEGIN_NATIVE_METHOD_DECL(/*func. name*/ split) {
     TJS_GET_NATIVE_INSTANCE(/*var. name*/ _this,
                             /*var. type*/ tTJSNI_RegExp);
@@ -520,6 +539,31 @@ TJS_BEGIN_NATIVE_METHOD_DECL(/*func. name*/ split) {
     return TJS_S_OK;
 }
 TJS_END_NATIVE_METHOD_DECL(/*func. name*/ split)
+//----------------------------------------------------------------------
+TJS_BEGIN_NATIVE_METHOD_DECL(/*func. name*/ split_alias) {
+    TJS_GET_NATIVE_INSTANCE(/*var. name*/ _this,
+                            /*var. type*/ tTJSNI_RegExp);
+
+    if(numparams < 1)
+        return TJS_E_BADPARAMCOUNT;
+
+    ttstr target(*param[0]);
+    bool purgeempty = false;
+    if(numparams >= 3)
+        purgeempty = param[2]->operator bool();
+
+    iTJSDispatch2 *array = nullptr;
+    _this->Split(&array, target, purgeempty);
+    if(result)
+        *result = tTJSVariant(array, array);
+    array->Release();
+
+    return TJS_S_OK;
+}
+TJS_END_NATIVE_METHOD_DECL_INT
+TJSNativeClassRegisterNCM(TJS_NCM_REG_THIS, TJS_W("split"),
+                          TJSCreateNativeClassMethod(NCM_split_alias::Process),
+                          __classname, nitMethod);
 //----------------------------------------------------------------------
 TJS_BEGIN_NATIVE_PROP_DECL(matches){ TJS_BEGIN_NATIVE_PROP_GETTER{
     TJS_GET_NATIVE_INSTANCE(/*var. name*/ _this,

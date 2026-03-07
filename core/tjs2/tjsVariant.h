@@ -20,6 +20,8 @@ namespace TJS {
 
     TJS_EXP_FUNC_DEF(void, TJSThrowDivideByZero, ());
 
+    TJS_EXP_FUNC_DEF(iTJSDispatch2 *, TJSGetCompatBoolObject, (bool add_ref));
+
     //---------------------------------------------------------------------------
     class tTJSVariantString;
 
@@ -684,6 +686,8 @@ namespace TJS {
                     Object.Object->AddRef();
                 return Object.Object;
             }
+            if(vt == tvtInteger && (Integer == 0 || Integer == 1))
+                return TJSGetCompatBoolObject(true);
 
             TJSThrowVariantConvertError(*this, tvtObject);
 
@@ -693,6 +697,8 @@ namespace TJS {
         TJS_CONST_METHOD_DEF(iTJSDispatch2 *, AsObjectNoAddRef, ()) {
             if(vt == tvtObject)
                 return Object.Object;
+            if(vt == tvtInteger && (Integer == 0 || Integer == 1))
+                return TJSGetCompatBoolObject(false);
             TJSThrowVariantConvertError(*this, tvtObject);
             return nullptr;
         }
@@ -703,6 +709,8 @@ namespace TJS {
                     Object.ObjThis->AddRef();
                 return Object.ObjThis;
             }
+            if(vt == tvtInteger && (Integer == 0 || Integer == 1))
+                return TJSGetCompatBoolObject(true);
             TJSThrowVariantConvertError(*this, tvtObject);
             return nullptr;
         }
@@ -711,6 +719,8 @@ namespace TJS {
             if(vt == tvtObject) {
                 return Object.ObjThis;
             }
+            if(vt == tvtInteger && (Integer == 0 || Integer == 1))
+                return TJSGetCompatBoolObject(false);
             TJSThrowVariantConvertError(*this, tvtObject);
             return nullptr;
         }

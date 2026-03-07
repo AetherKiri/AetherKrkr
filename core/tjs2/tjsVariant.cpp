@@ -11,6 +11,7 @@
 #include "tjsCommHead.h"
 
 #include "tjsVariant.h"
+#include "tjsDictionary.h"
 #include "tjsError.h"
 #include "tjsLex.h"
 #include "tjsUtils.h"
@@ -180,6 +181,17 @@ namespace TJS {
 
     //---------------------------------------------------------------------------
     void TJSThrowDivideByZero() { TJS_eTJSVariantError(TJSDivideByZero); }
+    //---------------------------------------------------------------------------
+
+    //---------------------------------------------------------------------------
+    iTJSDispatch2 *TJSGetCompatBoolObject(bool add_ref) {
+        static iTJSDispatch2 *compat_bool_object = nullptr;
+        if(!compat_bool_object)
+            compat_bool_object = TJSCreateDictionaryObject();
+        if(compat_bool_object && add_ref)
+            compat_bool_object->AddRef();
+        return compat_bool_object;
+    }
     //---------------------------------------------------------------------------
 
     //---------------------------------------------------------------------------
