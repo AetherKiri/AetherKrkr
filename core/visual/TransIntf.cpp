@@ -10,6 +10,7 @@
 //---------------------------------------------------------------------------
 #include "tjsCommHead.h"
 
+#include <spdlog/spdlog.h>
 #include "TransIntf.h"
 #include "LayerIntf.h"
 #include "GraphicsLoaderIntf.h"
@@ -330,13 +331,9 @@ iTVPTransHandlerProvider *TVPFindTransHandlerProvider(const ttstr &name) {
     tTVPTransHandlerProviderHolder *holder =
         TVPTransHandlerProviders.Find(name);
     if(!holder) {
-        static bool showed = false;
-        if(!showed) {
-            TVPShowSimpleMessageBox(
-                TVPFormatMessage(TVPCannotFindTransHander, name),
-                TJS_W("Warning"));
-            showed = true;
-        }
+        auto logger = spdlog::get("core");
+        if(logger) logger->warn("Transition handler '{}' not found, falling back to crossfade",
+                                ttstr(name).AsStdString());
         holder = TVPTransHandlerProviders.Find(TJS_W("crossfade"));
     }
 
