@@ -35,6 +35,10 @@ void SetPSBMediaCacheBudget(size_t maxEntries, size_t maxBytes) {
         return;
     psbMedia->setCacheBudget(maxEntries, maxBytes);
 }
+
+PSBMedia *GetGlobalPSBMedia() {
+    return psbMedia;
+}
 } // namespace PSB
 
 static bool psbCacheInfoCallback(size_t &usedBytes, size_t &limitBytes) {
