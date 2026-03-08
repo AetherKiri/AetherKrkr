@@ -2297,8 +2297,11 @@ void tTJSNI_BaseLayer::FromPrimaryCoordinates(tjs_real &x, tjs_real &y) const {
 //---------------------------------------------------------------------------
 void tTJSNI_BaseLayer::ChangeImageSize(tjs_uint width, tjs_uint height) {
     // be called from geographical management
-    if(!width || !height)
-        TVPThrowExceptionMessage(TVPCannotCreateEmptyLayerImage);
+    if(!width || !height) {
+        auto logger = spdlog::get("core");
+        if(logger) logger->warn("ChangeImageSize: ignoring zero dimension {}x{}", width, height);
+        return;
+    }
 
     int64_t oldBytes = TVPCalcMainImageBytes(MainImage);
     if(MainImage)
