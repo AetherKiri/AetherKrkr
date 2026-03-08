@@ -46,6 +46,15 @@ public:
 
   int get_totalTime() const { return 0; }
   int get_numberOfFrame() const { return 0; }
+  int get_numOfFrame() const { return 0; }
+
+  int get_FPSRate() const { return 30; }
+  int get_FPSScale() const { return 1; }
+
+  int get_screenWidth() const { return 1280; }
+  int get_screenHeight() const { return 720; }
+
+  int showNextImage(iTJSDispatch2 *) { return 0; }
 
 private:
   bool m_loop = false;
@@ -73,4 +82,10 @@ NCB_REGISTER_CLASS(AlphaMovie) {
   NCB_PROPERTY_RO(isPlaying, get_isPlaying);
   NCB_PROPERTY_RO(totalTime, get_totalTime);
   NCB_PROPERTY_RO(numberOfFrame, get_numberOfFrame);
+  NCB_PROPERTY_RO(numOfFrame, get_numOfFrame);
+  NCB_PROPERTY_RO(FPSRate, get_FPSRate);
+  NCB_PROPERTY_RO(FPSScale, get_FPSScale);
+  NCB_PROPERTY_RO(screenWidth, get_screenWidth);
+  NCB_PROPERTY_RO(screenHeight, get_screenHeight);
+  NCB_METHOD(showNextImage);
 };
