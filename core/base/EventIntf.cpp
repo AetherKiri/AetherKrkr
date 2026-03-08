@@ -20,6 +20,7 @@
 #include "ScriptMgnIntf.h"
 #include "TickCount.h"
 #include "SystemImpl.h"
+#include <spdlog/spdlog.h>
 
 //---------------------------------------------------------------------------
 // tTVPEvent  : script event class
