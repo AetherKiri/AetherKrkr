@@ -357,7 +357,7 @@ tTJSNI_BaseLayer *tTVPLayerManager::GetMostFrontChildAt(
 //---------------------------------------------------------------------------
 void tTVPLayerManager::PrimaryClick(tjs_int x, tjs_int y) {
     tTJSNI_BaseLayer *l = GetMostFrontChildAt(x, y);
-    if(l && CaptureOwner == l) {
+    if(l /*&& CaptureOwner == l*/) {
         l->FromPrimaryCoordinates(x, y);
         l->FireClick(x, y);
     }
