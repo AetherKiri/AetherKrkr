@@ -22,6 +22,7 @@
 #include "SysInitIntf.h"
 #include "XP3Archive.h"
 #include "TickCount.h"
+#include "ncbind.hpp"
 
 #define TVP_DEFAULT_ARCHIVE_CACHE_NUM 128
 #define TVP_DEFAULT_AUTOPATH_CACHE_NUM 256
@@ -1154,7 +1155,15 @@ ttstr TVPSearchPlacedPath(const ttstr &name) {
 // TVPIsExistentStorage
 //---------------------------------------------------------------------------
 bool TVPIsExistentStorage(const ttstr &name) {
-    return !TVPGetPlacedPath(name).IsEmpty();
+    if(!TVPGetPlacedPath(name).IsEmpty())
+        return true;
+    ttstr pure = TVPExtractStorageName(name);
+    if(pure.GetLen() > 4) {
+        ttstr ext = ttstr(pure.c_str() + pure.GetLen() - 4).AsLowerCase();
+        if(ext == TJS_W(".dll") || ext == TJS_W(".tpm"))
+            return ncbAutoRegister::HasModule(pure);
+    }
+    return false;
 }
 //---------------------------------------------------------------------------
 

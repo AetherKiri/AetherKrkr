@@ -52,6 +52,12 @@ bool ncbAutoRegister::LoadModule(const ttstr &_name)
 	return false;
 }
 
+bool ncbAutoRegister::HasModule(const ttstr &_name)
+{
+	ttstr name = _name.AsLowerCase();
+	return _internal_plugins.find(name) != _internal_plugins.end();
+}
+
 void ncbAutoRegister::LoadAllModules()
 {
     spdlog::trace("ncbAutoRegister::LoadAllModules: begin ({} modules in map)",
