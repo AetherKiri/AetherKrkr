@@ -23084,6 +23084,12 @@ static int posixFchown(int fd, uid_t uid, gid_t gid){
 /* Forward reference */
 static int openDirectory(const char*, int*);
 
+#if defined(__ANDROID__)
+static mode_t androidUmask(mode_t mode){
+  return umask(mode);
+}
+#endif
+
 /*
 ** Many system calls are accessed through pointer-to-functions so that
 ** they may be overridden at runtime to facilitate fault injection during
@@ -23195,7 +23201,11 @@ static struct unix_syscall {
   { "fchown",       (sqlite3_syscall_ptr)posixFchown,     0 },
 #define osFchown    ((int(*)(int,uid_t,gid_t))aSyscall[20].pCurrent)
 
+#if defined(__ANDROID__)
+  { "umask",        (sqlite3_syscall_ptr)androidUmask,     0 },
+#else
   { "umask",        (sqlite3_syscall_ptr)umask,           0 },
+#endif
 #define osUmask     ((mode_t(*)(mode_t))aSyscall[21].pCurrent)
 
 }; /* End of the overrideable system calls */
