@@ -85402,9 +85402,9 @@ static void roundFunc(sqlite3_context *context, int argc, sqlite3_value **argv){
   ** handle the rounding directly,
   ** otherwise use printf.
   */
-  if( n==0 && r>=0 && r<LARGEST_INT64-1 ){
+  if( n==0 && r>=0 && r<(double)(LARGEST_INT64-1) ){
     r = (double)((sqlite_int64)(r+0.5));
-  }else if( n==0 && r<0 && (-r)<LARGEST_INT64-1 ){
+  }else if( n==0 && r<0 && (-r)<(double)(LARGEST_INT64-1) ){
     r = -(double)((sqlite_int64)((-r)+0.5));
   }else{
     zBuf = sqlite3_mprintf("%.*f",n,r);
