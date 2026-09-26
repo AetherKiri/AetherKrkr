@@ -1,4 +1,4 @@
-# krkr2
+# AetherKrkr
 
 The KiriKiri2 (krkr2) engine runtime for [AetherKiri](https://github.com/AetherKiri/AetherKiri):
 the TJS2 script VM, the core engine modules (base/environ/extension/plugin/
@@ -8,7 +8,7 @@ AetherKiri main repository with full history (AetherKiri/AetherKiri#241).
 ## How it is consumed
 
 This repository is not built standalone: the AetherKiri checkout embeds it as
-the `packages/krkr2` submodule and wires it through `add_subdirectory()`,
+the `packages/AetherKrkr` submodule and wires it through `add_subdirectory()`,
 providing:
 
 - `KRKR2_ENGINE_ABI_INCLUDE_DIR` — the engine_api ABI headers of the
@@ -26,7 +26,7 @@ repository. Test suites under `tests/` and the CLI tools under `tools/`
 consuming checkout's `tests/` and `tools/` CMake lists.
 
 To iterate on the engine without committing gitlink bumps, point the main
-checkout's `AETHERKIRI_KRKR2_DIR` cache variable at a local krkr2 working
+checkout's `AETHERKIRI_KRKR_DIR` cache variable at a local krkr2 working
 copy.
 
 ## Layout
