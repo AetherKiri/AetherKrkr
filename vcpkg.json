@@ -40,6 +40,7 @@
       "platform": "!windows & !emscripten"
     },
     "libjpeg-turbo",
+    "liblzma",
     {
       "name": "libogg",
       "platform": "android"

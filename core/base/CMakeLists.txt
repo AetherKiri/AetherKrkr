@@ -79,6 +79,16 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     unofficial::minizip::minizip
 )
 
+# Static libarchive consumers need liblzma (xz filters) whenever libarchive
+# was built with xz support, but the FindLibArchive module does not
+# propagate that dependency. Link it whenever the consuming closure
+# provides it (emscripten builds libarchive without xz support and its
+# closure has no liblzma).
+find_package(LibLZMA)
+if(TARGET LibLZMA::LibLZMA)
+    target_link_libraries(${PROJECT_NAME} PRIVATE LibLZMA::LibLZMA)
+endif()
+
 if(APPLE)
     # The static libarchive package on macOS requires libb2 for RAR5 checksum
     # support, but FindLibArchive does not propagate that dependency.
