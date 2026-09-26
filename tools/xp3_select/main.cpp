@@ -7,6 +7,11 @@
 
 #include "XP3Archive.h"
 
+// The standalone selector does not start the full TVP environment, but the
+// shared debug logger pulled in by the plugin archive references this
+// query.  Keep the tool self-contained.
+bool TVPIsConsoleLogFileEnabled() { return false; }
+
 namespace fs = std::filesystem;
 
 static constexpr size_t kCopyBlockSize = 128 * 1024;
