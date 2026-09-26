@@ -16,7 +16,7 @@
 #include "tjsTypes.h"
 // tTVPPoint/tTVPPointD/tTVPRect (plus the TVPIntersectRect/TVPUnionRect
 // declarations) moved to the shared GPU bridge ABI header
-// bridge/engine_api/include/engine_gpu_bridge.h so the Godot extension and
+// abi/include/engine_gpu_bridge.h so the Godot extension and
 // the engine runtimes share one geometry definition.
 #include "engine_gpu_bridge.h"
 

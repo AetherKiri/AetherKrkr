@@ -15,7 +15,7 @@
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
-// Declared in bridge/engine_api/src/android_jni_bridge.cpp. The engine_api
+// Declared in abi/src/android_jni_bridge.cpp. The engine_api
 // JNI bridge owns the JavaVM (JNI_OnLoad injection, low-rate runtime
 // recovery); the engine reads it through these accessors so both sides
 // share a single source of truth after the Phase 2d link flip.

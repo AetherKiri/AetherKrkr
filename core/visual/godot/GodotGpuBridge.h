@@ -1,7 +1,7 @@
 #pragma once
 
 // Thin wrapper over the engine_api GPU bridge ABI
-// (bridge/engine_api/include/engine_gpu_bridge.h). The callback tables,
+// (abi/include/engine_gpu_bridge.h). The callback tables,
 // blend modes, and the tTVPRect/tTVPPointD geometry moved there so the
 // Godot extension and the siglus/rfvp runtime glue no longer depend on
 // krkr2 header paths. This header keeps only the krkr2-side C++ batch
