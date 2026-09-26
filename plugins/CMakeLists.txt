@@ -1,6 +1,14 @@
 cmake_minimum_required(VERSION 3.19)
 project(krkr2plugin)
 
+# Include layout is engine-root relative: this repository was extracted from
+# the AetherKiri main checkout (issue AetherKiri/AetherKiri#241) and the
+# former top-level KRKR2CORE_PATH/KRKR2PLUGIN_PATH variables became
+# self-contained paths.
+get_filename_component(KRKR2_ENGINE_ROOT
+    "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
+set(KRKR2_CORE_PATH "${KRKR2_ENGINE_ROOT}/core")
+
 add_library(${PROJECT_NAME} STATIC)
 
 target_sources(${PROJECT_NAME} PRIVATE
@@ -79,25 +87,25 @@ if(BUILD_GPU_BRIDGE)
 endif()
 
 target_include_directories(${PROJECT_NAME} PUBLIC
-    ${KRKR2CORE_PATH}/
-    ${KRKR2CORE_PATH}/base
-    ${KRKR2CORE_PATH}/base/win32
-    ${KRKR2CORE_PATH}/environ
-    ${KRKR2CORE_PATH}/environ/win32
-    ${KRKR2CORE_PATH}/environ/android
-    ${KRKR2CORE_PATH}/environ/sdl
-    ${KRKR2CORE_PATH}/msg
-    ${KRKR2CORE_PATH}/msg/win32
-    ${KRKR2CORE_PATH}/extension
-    ${KRKR2CORE_PATH}/sound
-    ${KRKR2CORE_PATH}/sound/win32
-    ${KRKR2CORE_PATH}/tjs2
-    ${KRKR2CORE_PATH}/utils
-    ${KRKR2CORE_PATH}/utils/win32
-    ${KRKR2CORE_PATH}/visual
-    ${KRKR2CORE_PATH}/visual/ARM
-    ${KRKR2CORE_PATH}/visual/win32
-    ${KRKR2CORE_PATH}/visual/RenderScript/rs
+    ${KRKR2_CORE_PATH}/
+    ${KRKR2_CORE_PATH}/base
+    ${KRKR2_CORE_PATH}/base/win32
+    ${KRKR2_CORE_PATH}/environ
+    ${KRKR2_CORE_PATH}/environ/win32
+    ${KRKR2_CORE_PATH}/environ/android
+    ${KRKR2_CORE_PATH}/environ/sdl
+    ${KRKR2_CORE_PATH}/msg
+    ${KRKR2_CORE_PATH}/msg/win32
+    ${KRKR2_CORE_PATH}/extension
+    ${KRKR2_CORE_PATH}/sound
+    ${KRKR2_CORE_PATH}/sound/win32
+    ${KRKR2_CORE_PATH}/tjs2
+    ${KRKR2_CORE_PATH}/utils
+    ${KRKR2_CORE_PATH}/utils/win32
+    ${KRKR2_CORE_PATH}/visual
+    ${KRKR2_CORE_PATH}/visual/ARM
+    ${KRKR2_CORE_PATH}/visual/win32
+    ${KRKR2_CORE_PATH}/visual/RenderScript/rs
 )
 
 add_definitions(-D__STDC_CONSTANT_MACROS -DTJS_TEXT_OUT_CRLF)
@@ -124,7 +132,10 @@ if(AETHERKIRI_INTERNAL_ENABLED AND
 endif()
 
 if(AETHERKIRI_INTERNAL_ENABLED AND COMMAND aetherinternal_extend_krkr2plugin)
-    aetherinternal_extend_krkr2plugin(${PROJECT_NAME})
+    # Contract v8: the private compat plugins include tjsNs0DataPack.h
+    # through the krkr2 source root instead of the former main-repository
+    # root (the "cpp/plugins" prefix went away with the extraction).
+    aetherinternal_extend_krkr2plugin(${PROJECT_NAME} "${KRKR2_ENGINE_ROOT}")
 else()
     target_sources(${PROJECT_NAME} PRIVATE
         tjsNs0DataPack.cpp
@@ -133,7 +144,9 @@ else()
     )
 endif()
 
-target_include_directories(${PROJECT_NAME} PUBLIC ${KRKR2PLUGIN_PATH} ${KRKR2PLUGIN_PATH}/simplebinder})
+target_include_directories(${PROJECT_NAME} PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/simplebinder)
 target_link_libraries(${PROJECT_NAME} PUBLIC krkr2core)
 
 add_subdirectory(psdfile)

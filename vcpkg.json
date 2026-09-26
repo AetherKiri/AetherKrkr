@@ -1,0 +1,98 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "krkr2",
+  "version-string": "2.0.0",
+  "description": "KiriKiri2 (krkr2) engine runtime for AetherKiri: TJS2 VM, core modules and native plugins",
+  "dependencies": [
+    "7zip",
+    {
+      "name": "argparse",
+      "platform": "linux | windows | osx"
+    },
+    {
+      "name": "boost-locale",
+      "default-features": false
+    },
+    {
+      "name": "catch2",
+      "default-features": false,
+      "platform": "!android & !ios & !emscripten"
+    },
+    "minizip",
+    "tinyxml2",
+    {
+      "name": "dirent",
+      "platform": "windows"
+    },
+    "ffmpeg",
+    "expat",
+    "fmt",
+    "freetype",
+    "jxrlib",
+    "libarchive",
+    {
+      "name": "libb2",
+      "platform": "osx"
+    },
+    "libxml2",
+    {
+      "name": "libgdiplus",
+      "platform": "!windows & !emscripten"
+    },
+    "libjpeg-turbo",
+    {
+      "name": "libogg",
+      "platform": "android"
+    },
+    {
+      "name": "libpng",
+      "platform": "!linux"
+    },
+    "libvorbis",
+    "libwebp",
+    "lz4",
+    {
+      "name": "oboe",
+      "platform": "android"
+    },
+    "oniguruma",
+    "openal-soft",
+    {
+      "name": "opencv4",
+      "default-features": false,
+      "features": [
+        {
+          "name": "openmp",
+          "platform": "!ios & !emscripten"
+        }
+      ]
+    },
+    {
+      "name": "opus",
+      "platform": "android"
+    },
+    {
+      "name": "opusfile",
+      "default-features": false
+    },
+    {
+      "name": "sdl2",
+      "default-features": false
+    },
+    "spdlog",
+    "highway",
+    "uchardet",
+    "unrar",
+    {
+      "name": "vcpkg-cmake",
+      "host": true
+    },
+    "zstd"
+  ],
+  "overrides": [
+    {
+      "name": "opencv4",
+      "version": "4.7.0#6"
+    }
+  ]
+}

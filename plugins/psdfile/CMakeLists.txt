@@ -1,15 +1,18 @@
 cmake_minimum_required(VERSION 3.19)
 project(psdfile)
 
+# The psdfile adapter package is a submodule of the consuming AetherKiri
+# checkout; its path is injected via KRKR2_PSDFILE_PACKAGE_ROOT.
 set(AETHERKIRI_PSDFILE_PACKAGE_ROOT
-    "${CMAKE_SOURCE_DIR}/packages/psdfile")
+    "${KRKR2_PSDFILE_PACKAGE_ROOT}")
 set(AETHERKIRI_PSDPARSE_ROOT
     "${AETHERKIRI_PSDFILE_PACKAGE_ROOT}/external/psdparse")
 
 if(NOT EXISTS "${AETHERKIRI_PSDFILE_PACKAGE_ROOT}/psdclass.cpp" OR
    NOT EXISTS "${AETHERKIRI_PSDPARSE_ROOT}/CMakeLists.txt")
     message(FATAL_ERROR
-        "packages/psdfile is incomplete; run: "
+        "The psdfile package referenced by KRKR2_PSDFILE_PACKAGE_ROOT is "
+        "incomplete; in an AetherKiri checkout run: "
         "git submodule update --init --recursive packages/psdfile")
 endif()
 

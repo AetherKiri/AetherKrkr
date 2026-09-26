@@ -75,9 +75,10 @@ set(VISUAL_HEADERS_DIR
     ${VISUAL_PATH}/godot
     ${VISUAL_PATH}/impl
     # Shared GPU bridge ABI: ComplexRect.h and godot/GodotGpuBridge.h include
-    # engine_gpu_bridge.h from the engine_api ABI layer, so every consumer of
-    # this module's headers can resolve it.
-    "${CMAKE_CURRENT_SOURCE_DIR}/../../../bridge/engine_api/include"
+    # engine_gpu_bridge.h from the engine_api ABI layer of the consuming
+    # AetherKiri checkout, so every consumer of this module's headers can
+    # resolve it.
+    "${KRKR2_ENGINE_ABI_INCLUDE_DIR}"
 )
 
 add_library(${PROJECT_NAME} STATIC ${VISUAL_SOURCE_FILES})

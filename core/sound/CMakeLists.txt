@@ -63,8 +63,11 @@ endif()
 find_package(OpenAL CONFIG REQUIRED)
 
 # Sanitize vcpkg's raw -Wl,-framework items on this scope's OpenAL copy so
-# swiftc-driven (mixed C++/Swift) consumers can link it.
-aetherkiri_sanitize_openal_link()
+# swiftc-driven (mixed C++/Swift) consumers can link it. The helper is
+# defined by the consuming AetherKiri checkout; guard it for other builds.
+if(COMMAND aetherkiri_sanitize_openal_link)
+    aetherkiri_sanitize_openal_link()
+endif()
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
     Vorbis::vorbis

@@ -1,0 +1,7 @@
+.DS_Store
+out/
+build/
+__pycache__/
+*.pyc
+tools/bin/
+plugin_trace.log

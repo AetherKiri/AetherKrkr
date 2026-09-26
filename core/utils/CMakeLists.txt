@@ -34,13 +34,14 @@ set(UTILS_HEADERS_DIR
 )
 
 add_library(${PROJECT_NAME} STATIC ${UTILS_SOURCE_FILES})
-# TextTransform moved to bridge/engine_api (Phase 2d): the transform hook is
-# runtime-neutral ABI state owned by the engine_api library, and krkr2 engine
-# sources (KAGParser, textrender, ...) resolve TVPTransformText against it
-# across the DSO boundary. Keep exposing its header path through this module
-# so core consumers keep compiling unchanged.
+# TextTransform lives in the consuming AetherKiri checkout's engine_api
+# (Phase 2d): the transform hook is runtime-neutral ABI state owned by the
+# engine_api library, and krkr2 engine sources (KAGParser, textrender, ...)
+# resolve TVPTransformText against it across the DSO boundary. Keep exposing
+# its header path through this module so core consumers keep compiling
+# unchanged.
 target_include_directories(${PROJECT_NAME} PUBLIC
     ${UTILS_HEADERS_DIR}
-    ${CMAKE_SOURCE_DIR}/bridge/engine_api/include
+    ${KRKR2_ENGINE_ABI_INCLUDE_DIR}
 )
 target_link_libraries(${PROJECT_NAME} PUBLIC tjs2 PRIVATE core_base_module core_environ_module)
