@@ -66,6 +66,7 @@ find_package(LibXml2 REQUIRED)
 find_package(SDL2 CONFIG REQUIRED)
 find_package(zstd CONFIG REQUIRED)
 find_package(unofficial-minizip CONFIG REQUIRED)
+find_package(unofficial-sodium CONFIG REQUIRED)
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
     uchardet::libuchardet
@@ -73,6 +74,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     LibArchive::LibArchive
     LibXml2::LibXml2
     zstd::libzstd
+    unofficial-sodium::sodium
 
     $<TARGET_NAME_IF_EXISTS:SDL2::SDL2main>
     $<IF:$<TARGET_EXISTS:SDL2::SDL2>,SDL2::SDL2,SDL2::SDL2-static>

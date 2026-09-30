@@ -47,6 +47,28 @@ void TVPSetXP3ArchiveContentFilter(tTVPXP3ArchiveContentFilter filter) {
 }
 
 //---------------------------------------------------------------------------
+// Unknown Chunk Filter
+//---------------------------------------------------------------------------
+static std::vector<tTVPXP3UnknownChunkFilter> TVPXP3UnknownChunkFilters;
+static std::mutex TVPXP3UnknownChunkFiltersMutex;
+
+void TVPRegisterXP3UnknownChunkFilter(tTVPXP3UnknownChunkFilter filter) {
+    std::lock_guard<std::mutex> lock(TVPXP3UnknownChunkFiltersMutex);
+    for (auto f : TVPXP3UnknownChunkFilters) {
+        if (f == filter) return;
+    }
+    TVPXP3UnknownChunkFilters.push_back(filter);
+}
+
+void TVPUnregisterXP3UnknownChunkFilter(tTVPXP3UnknownChunkFilter filter) {
+    std::lock_guard<std::mutex> lock(TVPXP3UnknownChunkFiltersMutex);
+    auto it = std::find(TVPXP3UnknownChunkFilters.begin(), TVPXP3UnknownChunkFilters.end(), filter);
+    if (it != TVPXP3UnknownChunkFilters.end()) {
+        TVPXP3UnknownChunkFilters.erase(it);
+    }
+}
+
+//---------------------------------------------------------------------------
 // tTVPXP3ArchiveHandleCache
 //---------------------------------------------------------------------------
 #define TVP_MAX_ARCHIVE_HANDLE_CACHE 8
@@ -612,6 +634,27 @@ void tTVPXP3Archive::Init(tTJSBinaryStream *st, tjs_int64 off,
                 Count++;
             }
 
+            // --- BROADCAST UNKNOWN CHUNKS TO PLUGINS ---
+            {
+                tjs_uint ch_pos = 0;
+                while(ch_pos + 12 <= index_size) {
+                    tjs_uint8 chunk_name[4];
+                    std::memcpy(chunk_name, indexdata + ch_pos, 4);
+                    tjs_uint64 chunk_size64 = ReadI64FromMem(indexdata + ch_pos + 4);
+                    tjs_uint chunk_size = (tjs_uint)chunk_size64;
+                    
+                    if (ch_pos + 12 + chunk_size > index_size) break;
+
+                    if (std::memcmp(chunk_name, cn_File, 4) != 0 && std::memcmp(chunk_name, cn_hnfn, 4) != 0) {
+                        std::lock_guard<std::mutex> lock(TVPXP3UnknownChunkFiltersMutex);
+                        for (auto filter : TVPXP3UnknownChunkFilters) {
+                            filter(this, st, offset, chunk_name, indexdata + ch_pos + 12, chunk_size);
+                        }
+                    }
+                    ch_pos += 12 + chunk_size;
+                }
+            }
+
             if(!(index_flag & TVP_XP3_INDEX_CONTINUE))
                 break; // continue reading index when the bit sets
         }
@@ -724,6 +767,14 @@ tTJSBinaryStream *tTVPXP3Archive::CreateStreamByIndex(tjs_uint idx) {
     }
 
     return out;
+}
+
+tTJSBinaryStream *tTVPXP3Archive::CreateStream(const ttstr &name) {
+    return tTVPArchive::CreateStream(name);
+}
+
+bool tTVPXP3Archive::IsExistent(const ttstr &name) {
+    return tTVPArchive::IsExistent(name);
 }
 
 //---------------------------------------------------------------------------

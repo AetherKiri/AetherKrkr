@@ -51,6 +51,7 @@
     },
     "libvorbis",
     "libwebp",
+    "libsodium",
     "lz4",
     {
       "name": "oboe",

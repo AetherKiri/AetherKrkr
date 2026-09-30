@@ -84,9 +84,8 @@ private:
     void AddToHash();
 
 public:
-    tTJSBinaryStream *CreateStream(const ttstr &name);
-
-    bool IsExistent(const ttstr &name);
+    virtual tTJSBinaryStream *CreateStream(const ttstr &name);
+    virtual bool IsExistent(const ttstr &name);
 
     tjs_int GetFirstIndexStartsWith(const ttstr &prefix);
     // returns first index which have 'prefix' at start of the name.
