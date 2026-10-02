@@ -863,25 +863,6 @@ static tTVPBitmap *AcquireTextBatchScratchBitmap(tjs_int w, tjs_int h) {
     return TextBatchScratchBitmap;
 }
 
-static inline tjs_uint8 TVPCombineTextScratchAlpha(tjs_uint8 dst,
-                                                   tjs_uint8 src) {
-    tjs_uint32 out = dst + src - ((static_cast<tjs_uint32>(dst) * src) >> 8);
-    out -= out >> 8;
-    return static_cast<tjs_uint8>(out > 255 ? 255 : out);
-}
-
-static inline void TVPWriteTextScratchPixel(tjs_uint32 &dst,
-                                            tjs_uint32 color,
-                                            tjs_uint8 alpha) {
-    if(alpha == 0)
-        return;
-    const tjs_uint8 dst_alpha = static_cast<tjs_uint8>(dst >> 24);
-    const tjs_uint8 out_alpha =
-        dst_alpha == 0 ? alpha : TVPCombineTextScratchAlpha(dst_alpha, alpha);
-    dst = (color & 0x00ffffff) |
-        (static_cast<tjs_uint32>(out_alpha) << 24);
-}
-
 bool tTVPNativeBaseBitmap::InternalBlendText(tTVPCharacterData *data,
                                              tTVPDrawTextData *dtdata,
                                              tjs_uint32 color,
@@ -919,9 +900,10 @@ bool tTVPNativeBaseBitmap::InternalBlendText(tTVPCharacterData *data,
         tjs_uint8 *dst = (tjs_uint8 *)tmp->GetBits();
         for(tjs_int y = 0; y < h; ++y) {
             for(tjs_int x = 0; x < w; ++x) {
-                TVPWriteTextScratchPixel(((tjs_uint32 *)dst)[x], color,
-                                         src[x]);
+                ((tjs_uint32 *)dst)[x] =
+                    (color & 0x00ffffff) | (static_cast<tjs_uint32>(src[x]) << 24);
             }
+            TVPConvertAlphaToAdditiveAlpha((tjs_uint32 *)dst, w);
             dst += dpitch;
             src += spitch;
         }
@@ -952,7 +934,7 @@ bool tTVPNativeBaseBitmap::InternalBlendText(tTVPCharacterData *data,
 
         tmp->Release();
 
-        GEMTHOD_OPA_CLR(AlphaBlend_d);
+        GEMTHOD_OPA_CLR(AlphaBlend_a);
         method->SetParameterOpa(opa_id, dtdata->opa);
         pTexSrc = _CharacterTextureRGBA;
     } else {
@@ -1079,7 +1061,9 @@ bool tTVPNativeBaseBitmap::InternalBlendTextVerticalGradient(
         const tjs_uint32 color =
             TVPLerpColor24(topcolor, bottomcolor, row, gradientHeight);
         for(tjs_int x = 0; x < w; ++x)
-            TVPWriteTextScratchPixel(out[x], color, src[x]);
+            out[x] = (color & 0x00ffffff) |
+                (static_cast<tjs_uint32>(src[x]) << 24);
+        TVPConvertAlphaToAdditiveAlpha(out, w);
         dst += dpitch;
     }
 
@@ -1109,7 +1093,7 @@ bool tTVPNativeBaseBitmap::InternalBlendTextVerticalGradient(
     tmp->Release();
 
     static iTVPRenderMethod *method =
-        TVPGetRenderManager()->GetRenderMethod("AlphaBlend_d");
+        TVPGetRenderManager()->GetRenderMethod("AlphaBlend_a");
     static int opa_id = method->EnumParameterID("opacity");
     method->SetParameterOpa(opa_id, dtdata->opa);
 
@@ -1939,12 +1923,21 @@ void tTVPNativeBaseBitmap::FlushPendingTextDraws() {
                         tjs_uint32 *dst32 =
                             reinterpret_cast<tjs_uint32 *>(dst);
                         for(tjs_int xx = 0; xx < w; ++xx) {
-                            TVPWriteTextScratchPixel(dst32[xx], draw_color,
-                                                     src[xx]);
+                            const tjs_uint8 alpha = src[xx];
+                            if(alpha)
+                                dst32[xx] =
+                                    (draw_color & 0x00ffffff) |
+                                    (static_cast<tjs_uint32>(alpha) << 24);
                         }
                         src += data->Pitch;
                         dst += dpitch;
                     }
+                }
+
+                for(tjs_int yy = 0; yy < batch_h; ++yy) {
+                    TVPConvertAlphaToAdditiveAlpha(
+                        reinterpret_cast<tjs_uint32 *>(bits + yy * dpitch),
+                        batch_w);
                 }
 
                 if(_CharacterTextureRGBA) {
@@ -1980,7 +1973,7 @@ void tTVPNativeBaseBitmap::FlushPendingTextDraws() {
                     return false;
 
                 static iTVPRenderMethod *method =
-                    TVPGetRenderManager()->GetRenderMethod("AlphaBlend_d");
+                    TVPGetRenderManager()->GetRenderMethod("AlphaBlend_a");
                 static int opa_id = method->EnumParameterID("opacity");
                 method->SetParameterOpa(opa_id, dtdata.opa);
                 tRenderTexRectArray::Element src_tex[] = {
@@ -2313,12 +2306,21 @@ void tTVPNativeBaseBitmap::DrawTextMultiple(
                 for(tjs_int yy = 0; yy < h; ++yy) {
                     tjs_uint32 *dst32 = reinterpret_cast<tjs_uint32 *>(dst);
                     for(tjs_int xx = 0; xx < w; ++xx) {
-                        TVPWriteTextScratchPixel(dst32[xx], draw_color,
-                                                 src[xx]);
+                        const tjs_uint8 alpha = src[xx];
+                        if(alpha)
+                            dst32[xx] =
+                                (draw_color & 0x00ffffff) |
+                                (static_cast<tjs_uint32>(alpha) << 24);
                     }
                     src += data->Pitch;
                     dst += dpitch;
                 }
+            }
+
+            for(tjs_int yy = 0; yy < batch_h; ++yy) {
+                TVPConvertAlphaToAdditiveAlpha(
+                    reinterpret_cast<tjs_uint32 *>(bits + yy * dpitch),
+                    batch_w);
             }
 
             if(_CharacterTextureRGBA) {
@@ -2357,7 +2359,7 @@ void tTVPNativeBaseBitmap::DrawTextMultiple(
                 return false;
 
             static iTVPRenderMethod *method =
-                TVPGetRenderManager()->GetRenderMethod("AlphaBlend_d");
+                TVPGetRenderManager()->GetRenderMethod("AlphaBlend_a");
             static int opa_id = method->EnumParameterID("opacity");
             method->SetParameterOpa(opa_id, dtdata.opa);
 
