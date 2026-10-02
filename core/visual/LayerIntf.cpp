@@ -9522,6 +9522,24 @@ void tTJSNI_BaseLayer::DrawText(tjs_int x, tjs_int y, const ttstr &text,
        shadowofsy == 0 && color == shadowcolor) {
         shadowcolor = 0x000000;
     }
+    const auto layer_name = GetName().AsStdString();
+    const auto *parent = GetParent();
+    const auto parent_name = parent ? parent->GetName().AsStdString() : "";
+    const bool message_text_layer =
+        layer_name.find("メッセージレイヤ") != std::string::npos &&
+        layer_name.find(":テキスト") != std::string::npos;
+    const bool message_scratch_layer =
+        layer_name == "msgRenderWork" &&
+        parent_name.find("メッセージレイヤ") != std::string::npos;
+    if((message_text_layer || message_scratch_layer) &&
+       shadowlevel > 255 && shadowwidth >= 3 && shadowofsx == 0 &&
+       shadowofsy == 0 && color == 0x00ffffff && shadowcolor == 0) {
+        // KAG's message hack draws the same edge on the full text layer and
+        // on each character's fade scratch layer.  Keep the white glyph, but
+        // reduce the edge pass so rapid page changes do not make it muddy.
+        shadowwidth = 2;
+        shadowlevel = std::min(shadowlevel, 2048);
+    }
     if(TVPLayerErrorTraceTake() &&
        (text.AsStdString().find("直太") != std::string::npos ||
         GetName().AsStdString().find("直太") != std::string::npos)) {
