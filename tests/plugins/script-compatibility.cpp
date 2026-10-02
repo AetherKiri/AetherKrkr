@@ -5,6 +5,8 @@
 
 #include <string>
 
+extern tTJS *TVPScriptEngine;
+
 namespace {
 
 using ScriptString = std::basic_string<tjs_char>;
@@ -18,6 +20,17 @@ public:
 
 private:
     tTJS *engine_;
+};
+
+class ScriptEngineBinding {
+public:
+    explicit ScriptEngineBinding(tTJS *engine) : previous_(TVPScriptEngine) {
+        TVPScriptEngine = engine;
+    }
+    ~ScriptEngineBinding() { TVPScriptEngine = previous_; }
+
+private:
+    tTJS *previous_;
 };
 
 tjs_int evaluateInteger(tTJS *engine, const tjs_char *expression) {
@@ -45,6 +58,37 @@ bool onlyExpectedMovieExists(const ttstr &name) {
 bool noMovieExists(const ttstr &) { return false; }
 
 } // namespace
+
+TEST_CASE("Dictionary read labels named after globals stay void") {
+    ScriptEngineOwner engine;
+    ScriptEngineBinding binding(engine.operator->());
+    REQUIRE_NOTHROW(engine->ExecScript(TJS_W(
+        "var System = %[];\n"
+        "class CompatReceiver {}\n"
+        "var receiver = new CompatReceiver();\n")));
+
+    CHECK(evaluateInteger(engine.operator->(), TJS_W(
+        "(function() {"
+        "  var labels = %[];"
+        "  return labels['System'] === void &&"
+        "         labels['Dictionary'] === void &&"
+        "         labels['Math'] === void;"
+        "})()")) == 1);
+    CHECK(evaluateInteger(engine.operator->(), TJS_W(
+        "(function() {"
+        "  var labels = %[];"
+        "  return +labels['System'];"
+        "})()")) == 0);
+    CHECK(evaluateInteger(engine.operator->(), TJS_W(
+        "(function() {"
+        "  var labels = %[ 'System' => 1 ];"
+        "  return +labels['System'];"
+        "})()")) == 1);
+
+    // Class receivers still use the existing compatibility lookup.
+    CHECK(evaluateInteger(engine.operator->(),
+                          TJS_W("receiver.System === System")) == 1);
+}
 
 TEST_CASE("Shifted final movie mapping follows a complete numbered sequence") {
     ttstr script(TJS_W(
