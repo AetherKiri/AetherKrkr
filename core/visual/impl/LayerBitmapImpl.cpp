@@ -934,7 +934,7 @@ bool tTVPNativeBaseBitmap::InternalBlendText(tTVPCharacterData *data,
 
         tmp->Release();
 
-        GEMTHOD_OPA_CLR(AlphaBlend_a);
+        GEMTHOD_OPA_CLR(AdditiveAlphaBlend_a);
         method->SetParameterOpa(opa_id, dtdata->opa);
         pTexSrc = _CharacterTextureRGBA;
     } else {
@@ -1093,7 +1093,7 @@ bool tTVPNativeBaseBitmap::InternalBlendTextVerticalGradient(
     tmp->Release();
 
     static iTVPRenderMethod *method =
-        TVPGetRenderManager()->GetRenderMethod("AlphaBlend_a");
+        TVPGetRenderManager()->GetRenderMethod("AdditiveAlphaBlend_a");
     static int opa_id = method->EnumParameterID("opacity");
     method->SetParameterOpa(opa_id, dtdata->opa);
 
@@ -1973,7 +1973,7 @@ void tTVPNativeBaseBitmap::FlushPendingTextDraws() {
                     return false;
 
                 static iTVPRenderMethod *method =
-                    TVPGetRenderManager()->GetRenderMethod("AlphaBlend_a");
+                    TVPGetRenderManager()->GetRenderMethod("AdditiveAlphaBlend_a");
                 static int opa_id = method->EnumParameterID("opacity");
                 method->SetParameterOpa(opa_id, dtdata.opa);
                 tRenderTexRectArray::Element src_tex[] = {
@@ -2359,7 +2359,7 @@ void tTVPNativeBaseBitmap::DrawTextMultiple(
                 return false;
 
             static iTVPRenderMethod *method =
-                TVPGetRenderManager()->GetRenderMethod("AlphaBlend_a");
+                TVPGetRenderManager()->GetRenderMethod("AdditiveAlphaBlend_a");
             static int opa_id = method->EnumParameterID("opacity");
             method->SetParameterOpa(opa_id, dtdata.opa);
 
