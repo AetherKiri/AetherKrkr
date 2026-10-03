@@ -347,6 +347,32 @@ static bool TVPShouldDeferKagTransitionMotionAssignment(
     return page_name == "表-背景" || page_name == "裏-背景";
 }
 
+// Some KAG message scripts render each character into a hidden 52x52 layer
+// under the primary layer, then replay that scratch layer into the visible
+// message text layer.  When the same script also installs its character-fade
+// divider, the divider has already produced the visible glyph and the scratch
+// replay composites a second copy over it.  Keep the divider operation and
+// suppress only this narrowly identifiable duplicate replay.
+static bool TVPIsKagHiddenCharacterMessageReplay(
+    tTJSNI_BaseLayer *target,
+    tTJSNI_BaseLayer *source) {
+    if(!target || !source || !target->GetVisible() ||
+       !source->GetName().IsEmpty() || source->GetVisible() ||
+       source->GetWidth() != 52 || source->GetHeight() != 52) {
+        return false;
+    }
+
+    const auto *source_parent = source->GetParent();
+    if(!source_parent ||
+       source_parent->GetName() != TJS_W("プライマリレイヤ")) {
+        return false;
+    }
+
+    const std::string target_name = target->GetName().AsStdString();
+    return target_name.find("メッセージレイヤ") != std::string::npos &&
+           target_name.find(":テキスト") != std::string::npos;
+}
+
 static void TVPClearExchangedKagPageRouting(
     const tTJSNI_BaseLayer *first,
     const tTJSNI_BaseLayer *second) {
@@ -9496,6 +9522,24 @@ void tTJSNI_BaseLayer::DrawText(tjs_int x, tjs_int y, const ttstr &text,
        shadowofsy == 0 && color == shadowcolor) {
         shadowcolor = 0x000000;
     }
+    const auto layer_name = GetName().AsStdString();
+    const auto *parent = GetParent();
+    const auto parent_name = parent ? parent->GetName().AsStdString() : "";
+    const bool message_text_layer =
+        layer_name.find("メッセージレイヤ") != std::string::npos &&
+        layer_name.find(":テキスト") != std::string::npos;
+    const bool message_scratch_layer =
+        layer_name == "msgRenderWork" &&
+        parent_name.find("メッセージレイヤ") != std::string::npos;
+    if((message_text_layer || message_scratch_layer) &&
+       shadowlevel > 255 && shadowwidth >= 3 && shadowofsx == 0 &&
+       shadowofsy == 0 && color == 0x00ffffff && shadowcolor == 0) {
+        // KAG's message hack draws the same edge on the full text layer and
+        // on each character's fade scratch layer.  Keep the white glyph, but
+        // reduce the edge pass so rapid page changes do not make it muddy.
+        shadowwidth = 2;
+        shadowlevel = std::min(shadowlevel, 2048);
+    }
     if(TVPLayerErrorTraceTake() &&
        (text.AsStdString().find("直太") != std::string::npos ||
         GetName().AsStdString().find("直太") != std::string::npos)) {
@@ -15044,17 +15088,17 @@ tTJSNC_Layer::tTJSNC_Layer() : tTJSNativeClass(TJS_W("Layer")) {
             return TJS_E_BADPARAMCOUNT;
 
         iTVPBaseBitmap *src = nullptr;
+        tTJSNI_BaseLayer *sourceLayer = nullptr;
         tTJSVariantClosure clo = param[2]->AsObjectClosureNoAddRef();
         tTVPBlendOperationMode automode = omAlpha;
         if(clo.Object) {
-            tTJSNI_BaseLayer *srclayer = nullptr;
             if(TJS_FAILED(clo.Object->NativeInstanceSupport(
                    TJS_NIS_GETINSTANCE, tTJSNC_Layer::ClassID,
-                   (iTJSNativeInstance **)&srclayer)))
+                   (iTJSNativeInstance **)&sourceLayer)))
                 src = nullptr;
             else
-                src = srclayer->GetMainImage(),
-                automode = srclayer->GetOperationModeFromType();
+                src = sourceLayer->GetMainImage(),
+                automode = sourceLayer->GetOperationModeFromType();
 
             if(src == nullptr) { // try to get bitmap interface
                 tTJSNI_Bitmap *srcbmp = nullptr;
@@ -15088,6 +15132,9 @@ tTJSNC_Layer::tTJSNC_Layer() : tTJSNativeClass(TJS_W("Layer")) {
         // get correct blend mode if the mode is omAuto
         if(mode == omAuto)
             mode = automode;
+
+        if(TVPIsKagHiddenCharacterMessageReplay(_this, sourceLayer))
+            return TJS_S_OK;
 
         _this->OperateRect(*param[0], *param[1], src, rect, mode,
                            (numparams >= 9 && param[8]->Type() != tvtVoid)

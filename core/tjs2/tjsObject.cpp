@@ -275,8 +275,13 @@ namespace TJS {
     }
 
     static bool TJSCompatResolveGlobalFallback(const tjs_char *membername,
-                                               tTJSVariant *result) {
-        if(!result) return false;
+                                               tTJSVariant *result,
+                                               iTJSDispatch2 *target) {
+        // Dictionary keys are user data.  A missing key named "System"
+        // (such as a KAG read-label entry) must remain void instead of
+        // resolving to the engine's global System object.
+        if(!result || dynamic_cast<tTJSDictionaryObject *>(target))
+            return false;
         const tjs_char *globalName = TJSCompatGlobalFallbackName(membername);
         if(!globalName) return false;
 
@@ -1804,7 +1809,7 @@ namespace TJS {
                                                  objthis)) {
                 return TJS_S_OK;
             }
-            if(TJSCompatResolveGlobalFallback(membername, result)) {
+            if(TJSCompatResolveGlobalFallback(membername, result, this)) {
                 return TJS_S_OK;
             }
             if(TJSCompatResolveTextRenderRenderCount(membername, result, this,

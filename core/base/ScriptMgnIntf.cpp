@@ -2807,6 +2807,10 @@ static void TVPApplyPostScriptCompatibilityPatches(const ttstr &shortname) {
         }
     }
     const bool patchWorld = lower == TJS_W("world.tjs");
+    // A bytecode multi-language setup can assign its secondary track before
+    // the selected main language is restored.  When the title is configured
+    // for a single view, that stale track is presented as a duplicate line.
+    const bool patchMultiLangSingle = lower == TJS_W("initialize.tjs");
     const bool patchAffineSource =
         lower == TJS_W("affinesource.tjs") ||
         lower == TJS_W("affinesourcelayer.tjs");
@@ -2832,8 +2836,21 @@ static void TVPApplyPostScriptCompatibilityPatches(const ttstr &shortname) {
     if(!patchWorld && !patchAffineSource && !patchD3DLayer && !patchD3DMotion &&
        !patchD3DEmote && !patchMessageText && !patchQuickMenu &&
        !patchSimpleAnim && !patchAction && !patchDialogTrace &&
-       !patchUiAutoTrace)
+       !patchUiAutoTrace && !patchMultiLangSingle)
         return;
+
+    if(patchMultiLangSingle) {
+        try {
+            tTJSVariant applied;
+            TVPExecuteExpression(
+                TJS_W("(function(){var k=global.kag;var c=global.SystemConfig;if(k!==void && c!==void && c.multiLangForceMultiLang && !c.useMultiLang && k.languageType>0 && c.subLanguageType>=0){c.subLanguageType=-1;return 1;}return 0;})()"),
+                &applied);
+            if(applied.AsInteger() != 0)
+                spdlog::info("Applied single-language compatibility for multi-language message renderer");
+        } catch(...) {
+            spdlog::warn("Failed to apply single-language compatibility for multi-language message renderer");
+        }
+    }
 
     if(patchDialogTrace || patchUiAutoTrace) {
         const char *trace = std::getenv("AETHERKIRI_DIALOG_TRACE");
