@@ -3336,7 +3336,16 @@ const tjs_char *TVPGetStartupPatchPrerequisitesScript() {
         "if(typeof global.COMMAND_ASYNC == \"undefined\") global.COMMAND_ASYNC = 1;\n"
         "if(typeof global.COMMAND_WAIT == \"undefined\") global.COMMAND_WAIT = 2;\n"
         "if(typeof global.kirikiriz == \"undefined\") global.kirikiriz = false;\n"
-        "if(typeof global.kirikiriz_generic == \"undefined\") global.kirikiriz_generic = false;\n");
+        "if(typeof global.kirikiriz_generic == \"undefined\") global.kirikiriz_generic = false;\n"
+        // Some KAG titles load their root patch from startup.tjs before the
+        // framework's system/Initialize.tjs has installed KAGLoadScript.
+        // Provide only the missing loader contract; a framework-defined or
+        // title-defined implementation remains authoritative.
+        "if(typeof global.KAGLoadScript == \"undefined\") {\n"
+        "  global.KAGLoadScript = function(storage) {\n"
+        "    return global.Scripts.execStorage(storage);\n"
+        "  };\n"
+        "}\n");
 }
 
 const tjs_char *TVPGetPatchWindowPrerequisitesScript() {
