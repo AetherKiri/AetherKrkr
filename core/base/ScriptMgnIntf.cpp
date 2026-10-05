@@ -431,6 +431,20 @@ psexcl		:%[type:ltPsExclusion		],
 //---------------------------------------------------------------------------
 tTJS *TVPScriptEngine = nullptr;
 ttstr TVPStartupScriptName(TJS_W("startup.tjs"));
+
+static bool TVPExecutingStartupScript = false;
+
+class tTVPStartupScriptPhaseGuard final {
+public:
+    explicit tTVPStartupScriptPhaseGuard(bool &active) : active_(active) {
+        active_ = true;
+    }
+
+    ~tTVPStartupScriptPhaseGuard() { active_ = false; }
+
+private:
+    bool &active_;
+};
 //---------------------------------------------------------------------------
 
 //---------------------------------------------------------------------------
@@ -3096,11 +3110,20 @@ static void TVPApplyPostScriptCompatibilityPatches(const ttstr &shortname) {
 }
 //---------------------------------------------------------------------------
 void TVPExecuteStorage(const ttstr &name, iTJSDispatch2 *context,
-                       tTJSVariant *result, bool isexpression,
-                       const tjs_char *modestr) {
+                        tTJSVariant *result, bool isexpression,
+                        const tjs_char *modestr) {
     // execute storage which contains script
     if(!TVPScriptEngine)
         TVPThrowInternalError;
+
+    // Some KAG titles execute a root patch.tjs from startup.tjs before the
+    // framework's system/Initialize.tjs has loaded Action.tjs and its base
+    // classes. Defer only that standard root patch during startup; it is
+    // executed again after framework initialization below.
+    if(TVPExecutingStartupScript && name == TJS_W("patch.tjs")) {
+        spdlog::info("Deferring root patch.tjs until framework startup completes");
+        return;
+    }
 
     TVPStorageExecutionSerial.fetch_add(1, std::memory_order_relaxed);
 
@@ -4097,58 +4120,62 @@ void TVPExecuteStartupScript() {
                             place.AsStdString().c_str());
 #endif
         TVPStartupSuccess = false;
-        try {
-            iTJSTextReadStream *stream = TVPCreateTextStreamForRead(place, "");
-            stream->Destruct();
-            TVPExecuteStorage(TVPStartupScriptName);
-            TVPStartupSuccess = true;
-        } catch(const TJS::eTJSScriptError &e) {
-            TVPLogStartupScriptError("Startup script error", e);
-            if(!TVPIsExistentStorage(TJS_W("system/Initialize.tjs"))) {
-                throw;
+        {
+            tTVPStartupScriptPhaseGuard startup_phase_guard(
+                TVPExecutingStartupScript);
+            try {
+                iTJSTextReadStream *stream = TVPCreateTextStreamForRead(place, "");
+                stream->Destruct();
+                TVPExecuteStorage(TVPStartupScriptName);
+                TVPStartupSuccess = true;
+            } catch(const TJS::eTJSScriptError &e) {
+                TVPLogStartupScriptError("Startup script error", e);
+                if(!TVPIsExistentStorage(TJS_W("system/Initialize.tjs"))) {
+                    throw;
+                }
+                spdlog::warn("Startup script failed; falling back to system/Initialize.tjs");
+                spdlog::default_logger()->flush();
+            } catch(const TJS::eTJS &e) {
+                spdlog::error("Startup script TJS error: {}", e.GetMessage().AsStdString());
+                spdlog::default_logger()->flush();
+                if(!TVPIsExistentStorage(TJS_W("system/Initialize.tjs"))) {
+                    throw;
+                }
+                spdlog::warn("Startup script failed; falling back to system/Initialize.tjs");
+                spdlog::default_logger()->flush();
+            } catch(const std::exception &e) {
+                spdlog::error("Startup script std::exception: {}", e.what());
+                spdlog::default_logger()->flush();
+                if(!TVPIsExistentStorage(TJS_W("system/Initialize.tjs"))) {
+                    throw;
+                }
+                spdlog::warn("Startup script failed; falling back to system/Initialize.tjs");
+                spdlog::default_logger()->flush();
+            } catch(const char *e) {
+                spdlog::error("Startup script const char exception: {}", e);
+                spdlog::default_logger()->flush();
+                if(!TVPIsExistentStorage(TJS_W("system/Initialize.tjs"))) {
+                    throw;
+                }
+                spdlog::warn("Startup script failed; falling back to system/Initialize.tjs");
+                spdlog::default_logger()->flush();
+            } catch(const tjs_char *e) {
+                spdlog::error("Startup script tjs_char exception: {}", ttstr(e).AsStdString());
+                spdlog::default_logger()->flush();
+                if(!TVPIsExistentStorage(TJS_W("system/Initialize.tjs"))) {
+                    throw;
+                }
+                spdlog::warn("Startup script failed; falling back to system/Initialize.tjs");
+                spdlog::default_logger()->flush();
+            } catch(...) {
+                spdlog::error("Startup script unknown exception");
+                spdlog::default_logger()->flush();
+                if(!TVPIsExistentStorage(TJS_W("system/Initialize.tjs"))) {
+                    throw;
+                }
+                spdlog::warn("Startup script failed; falling back to system/Initialize.tjs");
+                spdlog::default_logger()->flush();
             }
-            spdlog::warn("Startup script failed; falling back to system/Initialize.tjs");
-            spdlog::default_logger()->flush();
-        } catch(const TJS::eTJS &e) {
-            spdlog::error("Startup script TJS error: {}", e.GetMessage().AsStdString());
-            spdlog::default_logger()->flush();
-            if(!TVPIsExistentStorage(TJS_W("system/Initialize.tjs"))) {
-                throw;
-            }
-            spdlog::warn("Startup script failed; falling back to system/Initialize.tjs");
-            spdlog::default_logger()->flush();
-        } catch(const std::exception &e) {
-            spdlog::error("Startup script std::exception: {}", e.what());
-            spdlog::default_logger()->flush();
-            if(!TVPIsExistentStorage(TJS_W("system/Initialize.tjs"))) {
-                throw;
-            }
-            spdlog::warn("Startup script failed; falling back to system/Initialize.tjs");
-            spdlog::default_logger()->flush();
-        } catch(const char *e) {
-            spdlog::error("Startup script const char exception: {}", e);
-            spdlog::default_logger()->flush();
-            if(!TVPIsExistentStorage(TJS_W("system/Initialize.tjs"))) {
-                throw;
-            }
-            spdlog::warn("Startup script failed; falling back to system/Initialize.tjs");
-            spdlog::default_logger()->flush();
-        } catch(const tjs_char *e) {
-            spdlog::error("Startup script tjs_char exception: {}", ttstr(e).AsStdString());
-            spdlog::default_logger()->flush();
-            if(!TVPIsExistentStorage(TJS_W("system/Initialize.tjs"))) {
-                throw;
-            }
-            spdlog::warn("Startup script failed; falling back to system/Initialize.tjs");
-            spdlog::default_logger()->flush();
-        } catch(...) {
-            spdlog::error("Startup script unknown exception");
-            spdlog::default_logger()->flush();
-            if(!TVPIsExistentStorage(TJS_W("system/Initialize.tjs"))) {
-                throw;
-            }
-            spdlog::warn("Startup script failed; falling back to system/Initialize.tjs");
-            spdlog::default_logger()->flush();
         }
         if(!TVPStartupSuccess) {
             // try direct execute initialize.tjs to compatible for
