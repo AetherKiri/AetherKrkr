@@ -34,6 +34,7 @@ extern tTJSNativeClass *TVPCreateNativeClass_System();
 
 //---------------------------------------------------------------------------
 TJS_EXP_FUNC_DEF(ttstr, TVPGetPlatformName, ());
+TJS_EXP_FUNC_DEF(ttstr, TVPGetPlatformTag, ());
 // retrieve platform name (eg. "Win32")
 // implement in each platform.
 TJS_EXP_FUNC_DEF(ttstr, TVPGetOSName, ());

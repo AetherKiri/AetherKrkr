@@ -56,8 +56,25 @@ extern "C" void TVPEngineApiNotifyWebStartupReady() __attribute__((weak));
 // ---------------------------------------------------------------------------
 // Live2D post-draw hook — called after scene blit in UpdateDrawBuffer
 // ---------------------------------------------------------------------------
-static void (*g_postDrawHook)() = nullptr;
-void TVPSetPostDrawHook(void (*hook)()) { g_postDrawHook = hook; }
+using PostDrawHook = void (*)();
+std::atomic<PostDrawHook> g_postDrawHook{nullptr};
+
+using HostGpuFramePublishHook = void (*)(uint64_t, uint32_t, uint32_t,
+                                         uint64_t);
+std::atomic<HostGpuFramePublishHook> g_hostGpuFramePublishHook{nullptr};
+
+void TVPSetPostDrawHook(PostDrawHook hook) {
+    g_postDrawHook.store(hook, std::memory_order_release);
+}
+
+inline void InvokePostDrawHook() {
+    PostDrawHook hook = g_postDrawHook.load(std::memory_order_acquire);
+    if (hook != nullptr) hook();
+}
+
+extern "C" void TVPSetHostGpuFramePublishHook(HostGpuFramePublishHook hook) {
+    g_hostGpuFramePublishHook.store(hook, std::memory_order_release);
+}
 
 namespace {
 std::mutex g_host_frame_mutex;
@@ -648,16 +665,26 @@ void GetHostSurfaceSize(tjs_int fallback_w, tjs_int fallback_h,
 }
 
 void PublishHostGpuFrame(uint64_t texture, uint32_t width, uint32_t height) {
-    std::lock_guard<std::mutex> lock(g_host_frame_mutex);
-    g_host_gpu_texture = texture;
-    g_host_gpu_width = width;
-    g_host_gpu_height = height;
-    g_host_gpu_serial += 1;
-    g_host_frame_rgba.clear();
-    g_host_frame_width = width;
-    g_host_frame_height = height;
-    g_host_frame_stride = width * 4u;
-    g_host_frame_serial = g_host_gpu_serial;
+    uint64_t serial = 0;
+    {
+        std::lock_guard<std::mutex> lock(g_host_frame_mutex);
+        g_host_gpu_texture = texture;
+        g_host_gpu_width = width;
+        g_host_gpu_height = height;
+        g_host_gpu_serial += 1;
+        g_host_frame_rgba.clear();
+        g_host_frame_width = width;
+        g_host_frame_height = height;
+        g_host_frame_stride = width * 4u;
+        g_host_frame_serial = g_host_gpu_serial;
+        serial = g_host_gpu_serial;
+    }
+    // The native host consumes the publication directly. Keep this callback
+    // outside the frame mutex so a consumer can perform its own validation
+    // without creating a lock-order dependency on the engine frame state.
+    HostGpuFramePublishHook hook =
+        g_hostGpuFramePublishHook.load(std::memory_order_acquire);
+    if (hook != nullptr) hook(texture, width, height, serial);
 }
 
 void ApplyDrawDeviceSurfaceRect(iTVPDrawDevice *dd, const tTVPRect &rect,
@@ -813,7 +840,8 @@ extern "C" void TVPHostResetForGameSession() {
     }
     g_host_window_owner = nullptr;
     g_host_window_owners.clear();
-    g_postDrawHook = nullptr;
+    TVPSetPostDrawHook(nullptr);
+    TVPSetHostGpuFramePublishHook(nullptr);
     spdlog::info("Host render state reset for next game session");
 }
 
@@ -1118,7 +1146,7 @@ public:
             // Raw publication changes only the host image. Keep the engine's
             // logical window/input surface unchanged.
             ApplyDrawDeviceSurfaceRect(dd, surface_rect, surface_w, surface_h);
-            if (g_postDrawHook) g_postDrawHook();
+            InvokePostDrawHook();
             return;
         }
         }
@@ -1128,7 +1156,7 @@ public:
         auto* dd = owner_->GetDrawDevice();
         if (!dd) return;
         ApplyDrawDeviceSurfaceRect(dd, surface_rect, surface_w, surface_h);
-        if (g_postDrawHook) g_postDrawHook();
+        InvokePostDrawHook();
         return;
 #else
         // Blit the composited scene texture to the render target.
@@ -1152,7 +1180,7 @@ public:
             auto* dd = owner_ ? owner_->GetDrawDevice() : nullptr;
             if (!dd) return;
             ApplyDrawDeviceSurfaceRect(dd, surface_rect, surface_w, surface_h);
-            if (g_postDrawHook) g_postDrawHook();
+            InvokePostDrawHook();
             return;
         }
 
@@ -1194,7 +1222,7 @@ public:
             auto* dd = owner_->GetDrawDevice();
             if (!dd) return;
             ApplyDrawDeviceSurfaceRect(dd, surface_rect, surface_w, surface_h);
-            if (g_postDrawHook) g_postDrawHook();
+            InvokePostDrawHook();
             return;
         }
 
@@ -1208,7 +1236,7 @@ public:
             auto* dd = owner_->GetDrawDevice();
             if (!dd) return;
             ApplyDrawDeviceSurfaceRect(dd, surface_rect, surface_w, surface_h);
-            if (g_postDrawHook) g_postDrawHook();
+            InvokePostDrawHook();
             return;
         }
 
@@ -1396,7 +1424,7 @@ public:
         glUseProgram(0);
         glBindTexture(GL_TEXTURE_2D, 0);
 
-        if (g_postDrawHook) g_postDrawHook();
+        InvokePostDrawHook();
 
         // In IOSurface/WindowSurface mode, glFlush() is sufficient —
         // IOSurface has GPU-GPU sync, and WindowSurface (SurfaceTexture)
@@ -1813,6 +1841,29 @@ ttstr TVPGetPlatformName() {
     return ttstr(TJS_W("x86_64"));
 #else
     return ttstr(TJS_W("Unknown"));
+#endif
+}
+
+// Lower-case platform tag for scripts that branch on the target platform
+// (for example to decide whether native plugins or XP3 archives are usable).
+// Values follow the KiriKiriZ convention: windows / linux / macos / android /
+// ios / unknown. Note that this is independent of TVPGetPlatformName(), which
+// reports the CPU architecture.
+ttstr TVPGetPlatformTag() {
+#if defined(__ANDROID__)
+    return ttstr(TJS_W("android"));
+#elif defined(__APPLE__)
+#if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+    return ttstr(TJS_W("ios"));
+#else
+    return ttstr(TJS_W("macos"));
+#endif
+#elif defined(_WIN32)
+    return ttstr(TJS_W("windows"));
+#elif defined(__linux__)
+    return ttstr(TJS_W("linux"));
+#else
+    return ttstr(TJS_W("unknown"));
 #endif
 }
 
