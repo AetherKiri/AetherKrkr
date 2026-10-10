@@ -4,7 +4,7 @@ project(layerExDraw LANGUAGES CXX C)
 add_library(${PROJECT_NAME} STATIC)
 target_link_libraries(${PROJECT_NAME} PRIVATE krkr2plugin)
 
-if(WINDOWS)
+if(WIN32)
     target_compile_definitions(${PROJECT_NAME} PRIVATE -DUNICODE -D_UNICODE)
     target_sources(${PROJECT_NAME} PRIVATE
             windows/main.cpp
