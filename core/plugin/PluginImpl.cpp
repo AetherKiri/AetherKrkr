@@ -776,6 +776,30 @@ void TVPLoadInternalPlugins() {
         TVPLoadPlugin(TJS_W("hxv4_decoder.dll"));
         TVPLoadPlugin(TJS_W("varfile.dll"));
         TVPLoadPlugin(TJS_W("shrinkCopy.dll"));
+        // Legacy-class extensions register their members on the class object
+        // only, so instances created earlier never see them. Register the
+        // compatibility modules that consist purely of such members during
+        // startup, before any script can create a Layer/Window/System object,
+        // so a title that links the DLL late still gets the same API surface.
+        // Modules that also register classes or storage media keep loading on
+        // demand, and AETHER_ALL mode already loads everything.
+        static const tjs_char *const eagerCompatMembers[] = {
+            TJS_W("addFont.dll"),         TJS_W("fpslimit.dll"),
+            TJS_W("json.dll"),            TJS_W("layerExAreaAverage.dll"),
+            TJS_W("layerExColor.dll"),    TJS_W("layerExMosaic.dll"),
+            TJS_W("layerExSubImage.dll"), TJS_W("messenger.dll"),
+            TJS_W("msdfrender.dll"),      TJS_W("qrcode.dll"),
+            TJS_W("saveStruct.dll"),      TJS_W("shellExecute.dll"),
+            TJS_W("stdio.dll"),           TJS_W("tasktray.dll"),
+            TJS_W("tftSave.dll"),         TJS_W("toml.dll"),
+            TJS_W("windowExProgress.dll"),
+        };
+        for(const tjs_char *const member : eagerCompatMembers) {
+            if(!ncbAutoRegister::LoadModule(member)) {
+                spdlog::warn("compat member module '{}' is not registered",
+                             ttstr(member).AsStdString());
+            }
+        }
     }
     PluginCallTracer::Instance().LogRegistrationEnd();
 }

@@ -71,16 +71,28 @@ class-level compatibility stubs (`plugins/compatLegacyPlugins.cpp`).
 (`windows` / `linux` / `macos` / `android` / `ios` / `unknown`). It is separate
 from `System.platformName`, which reports the CPU architecture.
 
-### Known limitation (2026-10-11)
+### Member registration and link order
 
-`NCB_ATTACH_CLASS` registrations that extend a legacy class (`Layer`) register
-their members on the *class object* only: `typeof Layer.mosaic` is `Object`
-while `typeof layer.mosaic` is `undefined`, so calls from instances fail with
-"Member does not exist". The `layerExMosaic.dll`, `layerExColor.dll` and
-`layerExSubImage.dll` compatibility entries are affected, which also means
-their `unimplemented` receipts cannot fire yet. Fixing the attach path (or
-converting those entries to the mechanism the engine actually uses for legacy
-class extensions) is a separate change.
+`NCB_ATTACH_CLASS` members are written to the class object when the module is
+loaded, and only instances created *afterwards* see them: a `Layer` that already
+exists when a module is linked keeps its original member set
+(`typeof Layer.mosaic` is `Object` while `typeof layer.mosaic` stays
+`undefined`). Titles normally link their plugin DLLs from the first startup
+script, before creating layers, but a title that links later would silently lose
+the API.
+
+To remove that dependency for the compatibility surface, the modules that
+consist purely of legacy-class members are registered during startup, before any
+script runs (`core/plugin/PluginImpl.cpp`): addFont, fpslimit, json,
+layerExAreaAverage, layerExColor, layerExMosaic, layerExSubImage, messenger,
+msdfrender, qrcode, saveStruct, shellExecute, stdio, tasktray, tftSave, toml and
+windowExProgress. Modules that also register classes or storage media keep
+loading on demand, and `plugin_load_mode=aether_all` already registers
+everything.
+
+Verified with a probe fixture: a `Layer` created before linking
+`layerExMosaic.dll` now answers `mosaic()` and reports its `unimplemented`
+receipt exactly like one created after linking.
 
 ## License
 
