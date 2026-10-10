@@ -59,6 +59,10 @@ extern "C" void TVPEngineApiNotifyWebStartupReady() __attribute__((weak));
 using PostDrawHook = void (*)();
 std::atomic<PostDrawHook> g_postDrawHook{nullptr};
 
+using HostGpuFramePublishHook = void (*)(uint64_t, uint32_t, uint32_t,
+                                         uint64_t);
+std::atomic<HostGpuFramePublishHook> g_hostGpuFramePublishHook{nullptr};
+
 void TVPSetPostDrawHook(PostDrawHook hook) {
     g_postDrawHook.store(hook, std::memory_order_release);
 }
@@ -66,6 +70,10 @@ void TVPSetPostDrawHook(PostDrawHook hook) {
 inline void InvokePostDrawHook() {
     PostDrawHook hook = g_postDrawHook.load(std::memory_order_acquire);
     if (hook != nullptr) hook();
+}
+
+extern "C" void TVPSetHostGpuFramePublishHook(HostGpuFramePublishHook hook) {
+    g_hostGpuFramePublishHook.store(hook, std::memory_order_release);
 }
 
 namespace {
@@ -657,16 +665,26 @@ void GetHostSurfaceSize(tjs_int fallback_w, tjs_int fallback_h,
 }
 
 void PublishHostGpuFrame(uint64_t texture, uint32_t width, uint32_t height) {
-    std::lock_guard<std::mutex> lock(g_host_frame_mutex);
-    g_host_gpu_texture = texture;
-    g_host_gpu_width = width;
-    g_host_gpu_height = height;
-    g_host_gpu_serial += 1;
-    g_host_frame_rgba.clear();
-    g_host_frame_width = width;
-    g_host_frame_height = height;
-    g_host_frame_stride = width * 4u;
-    g_host_frame_serial = g_host_gpu_serial;
+    uint64_t serial = 0;
+    {
+        std::lock_guard<std::mutex> lock(g_host_frame_mutex);
+        g_host_gpu_texture = texture;
+        g_host_gpu_width = width;
+        g_host_gpu_height = height;
+        g_host_gpu_serial += 1;
+        g_host_frame_rgba.clear();
+        g_host_frame_width = width;
+        g_host_frame_height = height;
+        g_host_frame_stride = width * 4u;
+        g_host_frame_serial = g_host_gpu_serial;
+        serial = g_host_gpu_serial;
+    }
+    // The native host consumes the publication directly. Keep this callback
+    // outside the frame mutex so a consumer can perform its own validation
+    // without creating a lock-order dependency on the engine frame state.
+    HostGpuFramePublishHook hook =
+        g_hostGpuFramePublishHook.load(std::memory_order_acquire);
+    if (hook != nullptr) hook(texture, width, height, serial);
 }
 
 void ApplyDrawDeviceSurfaceRect(iTVPDrawDevice *dd, const tTVPRect &rect,
@@ -823,6 +841,7 @@ extern "C" void TVPHostResetForGameSession() {
     g_host_window_owner = nullptr;
     g_host_window_owners.clear();
     TVPSetPostDrawHook(nullptr);
+    TVPSetHostGpuFramePublishHook(nullptr);
     spdlog::info("Host render state reset for next game session");
 }
 
