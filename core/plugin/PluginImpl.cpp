@@ -648,6 +648,9 @@ void TVPLoadPlugin(const ttstr &name) {
         if(loaded) {
             TVPRegisteredPlugins.insert(normalizedShortName);
             stub = "ProxyStorageMap compatibility layer";
+            TVPAddCompatReceipt(name.AsStdString().c_str(),
+                                TJSCompatState::Unimplemented,
+                                "ProxyStorageMap compatibility layer");
         }
     }
 
@@ -657,17 +660,26 @@ void TVPLoadPlugin(const ttstr &name) {
             if(loaded) {
                 TVPRegisteredPlugins.insert(normalizedShortName);
                 stub = "GamepadStub";
+                TVPAddCompatReceipt(name.AsStdString().c_str(),
+                                    TJSCompatState::Unimplemented,
+                                    "mock stub: no physical gamepad input");
             }
         } else if(normalizedShortName == TJS_W("fontinfo.dll")) {
             TVPRegisterFontInfoStub();
             TVPRegisteredPlugins.insert(normalizedShortName);
             loaded = true;
             stub = "FontInfoStub";
+            TVPAddCompatReceipt(name.AsStdString().c_str(),
+                                TJSCompatState::Unimplemented,
+                                "mock stub: font information is not enumerated");
         } else if(normalizedShortName == TJS_W("tenshin.tpm") ||
                   normalizedShortName == TJS_W("tenshin.dll")) {
             TVPRegisteredPlugins.insert(normalizedShortName);
             loaded = true;
             stub = "TenshinNoopStub";
+            TVPAddCompatReceipt(name.AsStdString().c_str(),
+                                TJSCompatState::Unimplemented,
+                                "mock stub: tenshin calls are ignored");
             spdlog::info("Registered no-op compatibility stub for {}", name.AsStdString());
         }
     }
@@ -684,9 +696,17 @@ void TVPLoadPlugin(const ttstr &name) {
                       normalizedShortName == TJS_W("gfxfire.dll")) {
                 TVPRegisterGfxFireStub();
                 stub = "gfxFireStub";
+                TVPAddCompatReceipt(name.AsStdString().c_str(),
+                                    TJSCompatState::Unimplemented,
+                                    "mock stub: gfx effect calls are ignored");
             }
         }
         PluginCallTracer::Instance().LogPluginLoad(name.AsStdString(), false, stub);
+        if(stub == nullptr) {
+            TVPAddCompatReceipt(name.AsStdString().c_str(),
+                                TJSCompatState::Unavailable,
+                                "no implementation for this runtime");
+        }
     }
 }
 

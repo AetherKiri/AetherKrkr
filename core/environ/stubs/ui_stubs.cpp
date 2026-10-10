@@ -1816,6 +1816,29 @@ ttstr TVPGetPlatformName() {
 #endif
 }
 
+// Lower-case platform tag for scripts that branch on the target platform
+// (for example to decide whether native plugins or XP3 archives are usable).
+// Values follow the KiriKiriZ convention: windows / linux / macos / android /
+// ios / unknown. Note that this is independent of TVPGetPlatformName(), which
+// reports the CPU architecture.
+ttstr TVPGetPlatformTag() {
+#if defined(__ANDROID__)
+    return ttstr(TJS_W("android"));
+#elif defined(__APPLE__)
+#if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+    return ttstr(TJS_W("ios"));
+#else
+    return ttstr(TJS_W("macos"));
+#endif
+#elif defined(_WIN32)
+    return ttstr(TJS_W("windows"));
+#elif defined(__linux__)
+    return ttstr(TJS_W("linux"));
+#else
+    return ttstr(TJS_W("unknown"));
+#endif
+}
+
 // ---------------------------------------------------------------------------
 // TVPGetInternalPreferencePath — originally in MainScene.cpp
 // Returns the directory path for storing preferences/config files.

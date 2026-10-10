@@ -39,6 +39,49 @@ tests/      tjs2 and plugin test suites (wired by the consumer)
 tools/      xp3 / xp3_select CLI, plugin_gap_audit.py
 ```
 
+## Compatibility reporting
+
+Platform-limited features must say why they are missing. A game script that
+only sees `false`, or a class that silently returns `true` without doing the
+work, cannot tell "this build has no implementation" from "the call failed",
+and host diagnostics end up guessing.
+
+`DebugIntf.h` therefore exposes one receipt helper:
+
+```cpp
+TVPAddCompatReceipt(feature, TJSCompatState::Unavailable, "detail");
+```
+
+with four states — `loaded`, `unimplemented` (a compatibility or mock stub
+accepts the call without doing the work), `unavailable` (no implementation in
+this build), `failed` (an implementation exists but loading failed). Each
+`(feature, state)` pair is reported once and logged through spdlog, so it lands
+in the same engine log that host diagnostics export already tails:
+
+```
+[Compat] feature=<name> state=<state> detail=<text>
+```
+
+The receipts are also returned as `compat_receipts` by
+`engine_get_plugin_debug_info`, alongside the existing plugin counters. Current
+call sites: the plugin load path (`core/plugin/PluginImpl.cpp`) and the
+class-level compatibility stubs (`plugins/compatLegacyPlugins.cpp`).
+
+`System.platformTag` reports the target platform for scripts that branch on it
+(`windows` / `linux` / `macos` / `android` / `ios` / `unknown`). It is separate
+from `System.platformName`, which reports the CPU architecture.
+
+### Known limitation (2026-10-11)
+
+`NCB_ATTACH_CLASS` registrations that extend a legacy class (`Layer`) register
+their members on the *class object* only: `typeof Layer.mosaic` is `Object`
+while `typeof layer.mosaic` is `undefined`, so calls from instances fail with
+"Member does not exist". The `layerExMosaic.dll`, `layerExColor.dll` and
+`layerExSubImage.dll` compatibility entries are affected, which also means
+their `unimplemented` receipts cannot fire yet. Fixing the attach path (or
+converting those entries to the mechanism the engine actually uses for legacy
+class extensions) is a separate change.
+
 ## License
 
 GPL-3.0-or-later, same as AetherKiri. See `LICENSE`. Third-party notices for
