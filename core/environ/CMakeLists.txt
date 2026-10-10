@@ -20,7 +20,7 @@ set(ENVIRON_SOURCE_FILES
     
     $<$<BOOL:${LINUX}>:${ENVIRON_PATH}/linux/Platform.cpp>
 
-    $<$<BOOL:${WINDOWS}>:${ENVIRON_PATH}/win32/Platform.cpp>
+    $<$<BOOL:${WIN32}>:${ENVIRON_PATH}/win32/Platform.cpp>
 
     $<$<BOOL:${MACOS}>:${ENVIRON_PATH}/apple/macos/platform.mm>
 
