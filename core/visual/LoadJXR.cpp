@@ -1,5 +1,4 @@
 #include "tjsCommHead.h"
-
 #include "GraphicsLoaderIntf.h"
 #include "LayerBitmapIntf.h"
 #include "StorageIntf.h"
@@ -10,6 +9,11 @@
 #include "tjsDictionary.h"
 #include "ScriptMgnIntf.h"
 
+// jxrlib public headers depend on the legacy WIN32 macro (not defined by
+// cl.exe under Ninja) to map its WMSAL annotations onto modern SAL.
+#if defined(_WIN32) && !defined(WIN32)
+#define WIN32
+#endif
 #include <jxrlib/JXRGlue.h>
 
 static tjs_uint32 GetStride(const tjs_uint32 width, const tjs_uint32 bitCount) {

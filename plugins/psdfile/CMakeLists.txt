@@ -34,6 +34,11 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     "${AETHERKIRI_PSDPARSE_ROOT}")
 target_link_libraries(${PROJECT_NAME} PRIVATE krkr2plugin psdparse)
 
+if(MSVC)
+    # windows.h min/max macros break the std::min/std::max calls below.
+    target_compile_definitions(${PROJECT_NAME} PRIVATE NOMINMAX)
+endif()
+
 # PSD metadata/layer decoding is used by stand-image updates. Keep Debug
 # symbols while optimizing both the adapter and the pure C++ parser; no pixel
 # format or compositing path is changed.

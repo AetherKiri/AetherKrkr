@@ -557,7 +557,7 @@ namespace PSB {
                 size_t zero[4] = {0, 0, 0, 0};
                 size_t full[4] = {0, 0, 0, 0};
                 size_t partial[4] = {0, 0, 0, 0};
-                const size_t samples = std::min(pixelCount, size_t{4096});
+                const size_t samples = (std::min)(pixelCount, size_t{4096});
                 for(size_t p = 0; p < samples; ++p) {
                     const size_t base = p * 4;
                     for(size_t channel = 0; channel < 4; ++channel) {
@@ -902,7 +902,7 @@ namespace PSB {
         }
 
         size_t ClampSizeT(size_t value, size_t min_value, size_t max_value) {
-            return std::max(min_value, std::min(value, max_value));
+            return (std::max)(min_value, (std::min)(value, max_value));
         }
 
         float GetPSBFloat(const std::shared_ptr<IPSBValue> &value, float fallback = 0.0f) {
@@ -1373,11 +1373,11 @@ namespace PSB {
         size_t max_byte_size = _configuredMaxByteSize;
 
         if((self_used_mb >= 1500) || (free_mb >= 0 && free_mb < 512)) {
-            max_entry_count = std::min(max_entry_count, static_cast<size_t>(512));
+            max_entry_count = (std::min)(max_entry_count, static_cast<size_t>(512));
         } else if((self_used_mb >= 1100) || (free_mb >= 0 && free_mb < 800)) {
-            max_entry_count = std::min(max_entry_count, static_cast<size_t>(768));
+            max_entry_count = (std::min)(max_entry_count, static_cast<size_t>(768));
         } else if((self_used_mb >= 850) || (free_mb >= 0 && free_mb < 1200)) {
-            max_entry_count = std::min(max_entry_count, static_cast<size_t>(1024));
+            max_entry_count = (std::min)(max_entry_count, static_cast<size_t>(1024));
         }
 
         _maxEntryCount = max_entry_count;
@@ -2102,8 +2102,8 @@ namespace PSB {
         MotionSliceSet set;
         set.archiveKey = std::move(archiveKey);
         set.imageKeys = std::move(normalizedImages);
-        set.authoredWidth = std::max(0, authoredWidth);
-        set.authoredHeight = std::max(0, authoredHeight);
+        set.authoredWidth = (std::max)(0, authoredWidth);
+        set.authoredHeight = (std::max)(0, authoredHeight);
         set.generation = ++_motionSliceGeneration;
         _motionSliceSets.push_back(std::move(set));
     }

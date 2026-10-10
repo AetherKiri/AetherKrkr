@@ -119,7 +119,7 @@ namespace PSB {
                     auto getIntValue = [deDuplication](const PSBNumber &num,
                                                        int ori) {
                         return deDuplication
-                            ? std::max(static_cast<int>(num), ori)
+                            ? (std::max)(static_cast<int>(num), ori)
                             : static_cast<int>(num);
                     };
 

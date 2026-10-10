@@ -77,6 +77,8 @@ if(AETHERKIRI_INTERNAL_ENABLED AND COMMAND aetherinternal_extend_krkr2plugin_tes
     aetherinternal_extend_krkr2plugin_tests(motionplayer-dll)
 endif()
 
+aetherkiri_copy_engine_api_dll(motionplayer-dll)
+
 catch_discover_tests(motionplayer-dll)
 
 # Isolate registration-order tests from the shared plugin world used by the

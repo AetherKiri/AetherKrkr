@@ -87,10 +87,10 @@ namespace PSB::Extension {
 
         // 判断点是否在矩形内
         [[nodiscard]] bool Contains(float x, float y) const {
-            float effectiveLeft = std::min(X, X + Width);
-            float effectiveRight = std::max(X, X + Width);
-            float effectiveTop = std::min(Y, Y + Height);
-            float effectiveBottom = std::max(Y, Y + Height);
+            float effectiveLeft = (std::min)(X, X + Width);
+            float effectiveRight = (std::max)(X, X + Width);
+            float effectiveTop = (std::min)(Y, Y + Height);
+            float effectiveBottom = (std::max)(Y, Y + Height);
 
             return (x >= effectiveLeft) && (x < effectiveRight) &&
                 (y >= effectiveTop) && (y < effectiveBottom);
@@ -98,15 +98,15 @@ namespace PSB::Extension {
 
         // 判断矩形是否完全在当前矩形内
         [[nodiscard]] bool Contains(const RectangleF &rect) const {
-            float currLeft = std::min(X, X + Width);
-            float currRight = std::max(X, X + Width);
-            float currTop = std::min(Y, Y + Height);
-            float currBottom = std::max(Y, Y + Height);
+            float currLeft = (std::min)(X, X + Width);
+            float currRight = (std::max)(X, X + Width);
+            float currTop = (std::min)(Y, Y + Height);
+            float currBottom = (std::max)(Y, Y + Height);
 
-            float rectLeft = std::min(rect.X, rect.X + rect.Width);
-            float rectRight = std::max(rect.X, rect.X + rect.Width);
-            float rectTop = std::min(rect.Y, rect.Y + rect.Height);
-            float rectBottom = std::max(rect.Y, rect.Y + rect.Height);
+            float rectLeft = (std::min)(rect.X, rect.X + rect.Width);
+            float rectRight = (std::max)(rect.X, rect.X + rect.Width);
+            float rectTop = (std::min)(rect.Y, rect.Y + rect.Height);
+            float rectBottom = (std::max)(rect.Y, rect.Y + rect.Height);
 
             return (rectLeft >= currLeft) && (rectRight <= currRight) &&
                 (rectTop >= currTop) && (rectBottom <= currBottom);
@@ -120,10 +120,10 @@ namespace PSB::Extension {
 
         // 修改当前矩形为与另一矩形的交集
         void Intersect(const RectangleF &rect) {
-            float interLeft = std::max(Left(), rect.Left());
-            float interRight = std::min(Right(), rect.Right());
-            float interTop = std::max(Top(), rect.Top());
-            float interBottom = std::min(Bottom(), rect.Bottom());
+            float interLeft = (std::max)(Left(), rect.Left());
+            float interRight = (std::min)(Right(), rect.Right());
+            float interTop = (std::max)(Top(), rect.Top());
+            float interBottom = (std::min)(Bottom(), rect.Bottom());
 
             if(interLeft >= interRight || interTop >= interBottom) {
                 X = Y = Width = Height = 0.0f; // 设为空矩形
@@ -137,10 +137,10 @@ namespace PSB::Extension {
 
         // 静态方法：返回两个矩形的交集
         static RectangleF Intersect(const RectangleF &a, const RectangleF &b) {
-            float interLeft = std::max(a.Left(), b.Left());
-            float interRight = std::min(a.Right(), b.Right());
-            float interTop = std::max(a.Top(), b.Top());
-            float interBottom = std::min(a.Bottom(), b.Bottom());
+            float interLeft = (std::max)(a.Left(), b.Left());
+            float interRight = (std::min)(a.Right(), b.Right());
+            float interTop = (std::max)(a.Top(), b.Top());
+            float interBottom = (std::min)(a.Bottom(), b.Bottom());
 
             if(interLeft >= interRight || interTop >= interBottom) {
                 return {}; // 空矩形
@@ -151,10 +151,10 @@ namespace PSB::Extension {
 
         // 静态方法：返回两个矩形的并集
         static RectangleF Union(const RectangleF &a, const RectangleF &b) {
-            float unionLeft = std::min(a.Left(), b.Left());
-            float unionRight = std::max(a.Right(), b.Right());
-            float unionTop = std::min(a.Top(), b.Top());
-            float unionBottom = std::max(a.Bottom(), b.Bottom());
+            float unionLeft = (std::min)(a.Left(), b.Left());
+            float unionRight = (std::max)(a.Right(), b.Right());
+            float unionTop = (std::min)(a.Top(), b.Top());
+            float unionBottom = (std::max)(a.Bottom(), b.Bottom());
 
             return { unionLeft, unionTop, unionRight - unionLeft,
                      unionBottom - unionTop };

@@ -1,4 +1,4 @@
-// QR_Encode.h : CQR_Encode ƒNƒ‰ƒXéŒ¾‚¨‚æ‚ÑƒCƒ“ƒ^[ƒtƒFƒCƒX’è‹`
+// QR_Encode.h : CQR_Encode ã‚¯ãƒ©ã‚¹å®£è¨€ãŠã‚ˆã³ã‚¤ãƒ³ã‚¿ãƒ¼ãƒ•ã‚§ã‚¤ã‚¹å®šç¾©
 // Date 2006/05/17	Ver. 1.22	Psytec Inc.
 
 #if !defined(AFX_QR_ENCODE_H__AC886DF7_C0AE_4C9F_AC7A_FCDA8CB1DD37__INCLUDED_)
@@ -24,102 +24,102 @@ using LPBYTE = BYTE *;
 #endif // _MSC_VER > 1000
 
 /////////////////////////////////////////////////////////////////////////////
-// ’è”
+// å®šæ•°
 
-// Œë‚è’ù³ƒŒƒxƒ‹
+// èª¤ã‚Šè¨‚æ­£ãƒ¬ãƒ™ãƒ«
 #define QR_LEVEL_L	0
 #define QR_LEVEL_M	1
 #define QR_LEVEL_Q	2
 #define QR_LEVEL_H	3
 
-// ƒf[ƒ^ƒ‚[ƒh
+// ãƒ‡ãƒ¼ã‚¿ãƒ¢ãƒ¼ãƒ‰
 #define QR_MODE_NUMERAL		0
 #define QR_MODE_ALPHABET	1
 #define QR_MODE_8BIT		2
 #define QR_MODE_KANJI		3
 
-// ƒo[ƒWƒ‡ƒ“(Œ^”Ô)ƒOƒ‹[ƒv
-#define QR_VRESION_S	0 // 1 ` 9
-#define QR_VRESION_M	1 // 10 ` 26
-#define QR_VRESION_L	2 // 27 ` 40
+// ãƒãƒ¼ã‚¸ãƒ§ãƒ³(åž‹ç•ª)ã‚°ãƒ«ãƒ¼ãƒ—
+#define QR_VRESION_S	0 // 1 ï½ž 9
+#define QR_VRESION_M	1 // 10 ï½ž 26
+#define QR_VRESION_L	2 // 27 ï½ž 40
 
-#define MAX_ALLCODEWORD	 3706 // ‘ƒR[ƒhƒ[ƒh”Å‘å’l
-#define MAX_DATACODEWORD 2956 // ƒf[ƒ^ƒR[ƒhƒ[ƒhÅ‘å’l(ƒo[ƒWƒ‡ƒ“40-L)
-#define MAX_CODEBLOCK	  153 // ƒuƒƒbƒNƒf[ƒ^ƒR[ƒhƒ[ƒh”Å‘å’l(‚q‚rƒR[ƒhƒ[ƒh‚ðŠÜ‚Þ)
-#define MAX_MODULESIZE	  177 // ˆê•Óƒ‚ƒWƒ…[ƒ‹”Å‘å’l
+#define MAX_ALLCODEWORD	 3706 // ç·ã‚³ãƒ¼ãƒ‰ãƒ¯ãƒ¼ãƒ‰æ•°æœ€å¤§å€¤
+#define MAX_DATACODEWORD 2956 // ãƒ‡ãƒ¼ã‚¿ã‚³ãƒ¼ãƒ‰ãƒ¯ãƒ¼ãƒ‰æœ€å¤§å€¤(ãƒãƒ¼ã‚¸ãƒ§ãƒ³40-L)
+#define MAX_CODEBLOCK	  153 // ãƒ–ãƒ­ãƒƒã‚¯ãƒ‡ãƒ¼ã‚¿ã‚³ãƒ¼ãƒ‰ãƒ¯ãƒ¼ãƒ‰æ•°æœ€å¤§å€¤(ï¼²ï¼³ã‚³ãƒ¼ãƒ‰ãƒ¯ãƒ¼ãƒ‰ã‚’å«ã‚€)
+#define MAX_MODULESIZE	  177 // ä¸€è¾ºãƒ¢ã‚¸ãƒ¥ãƒ¼ãƒ«æ•°æœ€å¤§å€¤
 
-// ƒrƒbƒgƒ}ƒbƒv•`‰æŽžƒ}[ƒWƒ“
+// ãƒ“ãƒƒãƒˆãƒžãƒƒãƒ—æç”»æ™‚ãƒžãƒ¼ã‚¸ãƒ³
 #define QR_MARGIN	4
 
 
 /////////////////////////////////////////////////////////////////////////////
 typedef struct tagRS_BLOCKINFO
 {
-	int ncRSBlock;		// ‚q‚rƒuƒƒbƒN”
-	int ncAllCodeWord;	// ƒuƒƒbƒN“àƒR[ƒhƒ[ƒh”
-	int ncDataCodeWord;	// ƒf[ƒ^ƒR[ƒhƒ[ƒh”(ƒR[ƒhƒ[ƒh” - ‚q‚rƒR[ƒhƒ[ƒh”)
+	int ncRSBlock;		// ï¼²ï¼³ãƒ–ãƒ­ãƒƒã‚¯æ•°
+	int ncAllCodeWord;	// ãƒ–ãƒ­ãƒƒã‚¯å†…ã‚³ãƒ¼ãƒ‰ãƒ¯ãƒ¼ãƒ‰æ•°
+	int ncDataCodeWord;	// ãƒ‡ãƒ¼ã‚¿ã‚³ãƒ¼ãƒ‰ãƒ¯ãƒ¼ãƒ‰æ•°(ã‚³ãƒ¼ãƒ‰ãƒ¯ãƒ¼ãƒ‰æ•° - ï¼²ï¼³ã‚³ãƒ¼ãƒ‰ãƒ¯ãƒ¼ãƒ‰æ•°)
 
 } RS_BLOCKINFO, *LPRS_BLOCKINFO;
 
 
 /////////////////////////////////////////////////////////////////////////////
-// QRƒR[ƒhƒo[ƒWƒ‡ƒ“(Œ^”Ô)ŠÖ˜Aî•ñ
+// QRã‚³ãƒ¼ãƒ‰ãƒãƒ¼ã‚¸ãƒ§ãƒ³(åž‹ç•ª)é–¢é€£æƒ…å ±
 
 typedef struct tagQR_VERSIONINFO
 {
-	int nVersionNo;	   // ƒo[ƒWƒ‡ƒ“(Œ^”Ô)”Ô†(1`40)
-	int ncAllCodeWord; // ‘ƒR[ƒhƒ[ƒh”
+	int nVersionNo;	   // ãƒãƒ¼ã‚¸ãƒ§ãƒ³(åž‹ç•ª)ç•ªå·(1ï½ž40)
+	int ncAllCodeWord; // ç·ã‚³ãƒ¼ãƒ‰ãƒ¯ãƒ¼ãƒ‰æ•°
 
-	// ˆÈ‰º”z—ñ“YŽš‚ÍŒë‚è’ù³—¦(0 = L, 1 = M, 2 = Q, 3 = H) 
-	int ncDataCodeWord[4];	// ƒf[ƒ^ƒR[ƒhƒ[ƒh”(‘ƒR[ƒhƒ[ƒh” - ‚q‚rƒR[ƒhƒ[ƒh”)
+	// ä»¥ä¸‹é…åˆ—æ·»å­—ã¯èª¤ã‚Šè¨‚æ­£çŽ‡(0 = L, 1 = M, 2 = Q, 3 = H) 
+	int ncDataCodeWord[4];	// ãƒ‡ãƒ¼ã‚¿ã‚³ãƒ¼ãƒ‰ãƒ¯ãƒ¼ãƒ‰æ•°(ç·ã‚³ãƒ¼ãƒ‰ãƒ¯ãƒ¼ãƒ‰æ•° - ï¼²ï¼³ã‚³ãƒ¼ãƒ‰ãƒ¯ãƒ¼ãƒ‰æ•°)
 
-	int ncAlignPoint;	// ƒAƒ‰ƒCƒƒ“ƒgƒpƒ^[ƒ“À•W”
-	int nAlignPoint[6];	// ƒAƒ‰ƒCƒƒ“ƒgƒpƒ^[ƒ“’†SÀ•W
+	int ncAlignPoint;	// ã‚¢ãƒ©ã‚¤ãƒ¡ãƒ³ãƒˆãƒ‘ã‚¿ãƒ¼ãƒ³åº§æ¨™æ•°
+	int nAlignPoint[6];	// ã‚¢ãƒ©ã‚¤ãƒ¡ãƒ³ãƒˆãƒ‘ã‚¿ãƒ¼ãƒ³ä¸­å¿ƒåº§æ¨™
 
-	RS_BLOCKINFO RS_BlockInfo1[4]; // ‚q‚rƒuƒƒbƒNî•ñ(1)
-	RS_BLOCKINFO RS_BlockInfo2[4]; // ‚q‚rƒuƒƒbƒNî•ñ(2)
+	RS_BLOCKINFO RS_BlockInfo1[4]; // ï¼²ï¼³ãƒ–ãƒ­ãƒƒã‚¯æƒ…å ±(1)
+	RS_BLOCKINFO RS_BlockInfo2[4]; // ï¼²ï¼³ãƒ–ãƒ­ãƒƒã‚¯æƒ…å ±(2)
 
 } QR_VERSIONINFO, *LPQR_VERSIONINFO;
 
 
 /////////////////////////////////////////////////////////////////////////////
-// CQR_Encode ƒNƒ‰ƒX
+// CQR_Encode ã‚¯ãƒ©ã‚¹
 
 class CQR_Encode
 {
-// \’z/Á–Å
+// æ§‹ç¯‰/æ¶ˆæ»…
 public:
 	CQR_Encode();
 	~CQR_Encode();
 
 public:
-	int m_nLevel;		// Œë‚è’ù³ƒŒƒxƒ‹
-	int m_nVersion;		// ƒo[ƒWƒ‡ƒ“(Œ^”Ô)
-	BOOL m_bAutoExtent;	// ƒo[ƒWƒ‡ƒ“(Œ^”Ô)Ž©“®Šg’£Žw’èƒtƒ‰ƒO
-	int m_nMaskingNo;	// ƒ}ƒXƒLƒ“ƒOƒpƒ^[ƒ“”Ô†
+	int m_nLevel;		// èª¤ã‚Šè¨‚æ­£ãƒ¬ãƒ™ãƒ«
+	int m_nVersion;		// ãƒãƒ¼ã‚¸ãƒ§ãƒ³(åž‹ç•ª)
+	BOOL m_bAutoExtent;	// ãƒãƒ¼ã‚¸ãƒ§ãƒ³(åž‹ç•ª)è‡ªå‹•æ‹¡å¼µæŒ‡å®šãƒ•ãƒ©ã‚°
+	int m_nMaskingNo;	// ãƒžã‚¹ã‚­ãƒ³ã‚°ãƒ‘ã‚¿ãƒ¼ãƒ³ç•ªå·
 
 public:
 	int m_nSymbleSize;
 	BYTE m_byModuleData[MAX_MODULESIZE][MAX_MODULESIZE]; // [x][y]
-	// bit5:‹@”\ƒ‚ƒWƒ…[ƒ‹iƒ}ƒXƒLƒ“ƒO‘ÎÛŠOjƒtƒ‰ƒO
-	// bit4:‹@”\ƒ‚ƒWƒ…[ƒ‹•`‰æƒf[ƒ^
-	// bit1:ƒGƒ“ƒR[ƒhƒf[ƒ^
-	// bit0:ƒ}ƒXƒNŒãƒGƒ“ƒR[ƒh•`‰æƒf[ƒ^
-	// 20h‚Æ‚Ì˜_—˜a‚É‚æ‚è‹@”\ƒ‚ƒWƒ…[ƒ‹”»’èA11h‚Æ‚Ì˜_—˜a‚É‚æ‚è•`‰æiÅI“I‚É‚ÍBOOL’l‰»j
+	// bit5:æ©Ÿèƒ½ãƒ¢ã‚¸ãƒ¥ãƒ¼ãƒ«ï¼ˆãƒžã‚¹ã‚­ãƒ³ã‚°å¯¾è±¡å¤–ï¼‰ãƒ•ãƒ©ã‚°
+	// bit4:æ©Ÿèƒ½ãƒ¢ã‚¸ãƒ¥ãƒ¼ãƒ«æç”»ãƒ‡ãƒ¼ã‚¿
+	// bit1:ã‚¨ãƒ³ã‚³ãƒ¼ãƒ‰ãƒ‡ãƒ¼ã‚¿
+	// bit0:ãƒžã‚¹ã‚¯å¾Œã‚¨ãƒ³ã‚³ãƒ¼ãƒ‰æç”»ãƒ‡ãƒ¼ã‚¿
+	// 20hã¨ã®è«–ç†å’Œã«ã‚ˆã‚Šæ©Ÿèƒ½ãƒ¢ã‚¸ãƒ¥ãƒ¼ãƒ«åˆ¤å®šã€11hã¨ã®è«–ç†å’Œã«ã‚ˆã‚Šæç”»ï¼ˆæœ€çµ‚çš„ã«ã¯BOOLå€¤åŒ–ï¼‰
 
 private:
-	int m_ncDataCodeWordBit; // ƒf[ƒ^ƒR[ƒhƒ[ƒhƒrƒbƒg’·
-	BYTE m_byDataCodeWord[MAX_DATACODEWORD]; // “ü—Íƒf[ƒ^ƒGƒ“ƒR[ƒhƒGƒŠƒA
+	int m_ncDataCodeWordBit; // ãƒ‡ãƒ¼ã‚¿ã‚³ãƒ¼ãƒ‰ãƒ¯ãƒ¼ãƒ‰ãƒ“ãƒƒãƒˆé•·
+	BYTE m_byDataCodeWord[MAX_DATACODEWORD]; // å…¥åŠ›ãƒ‡ãƒ¼ã‚¿ã‚¨ãƒ³ã‚³ãƒ¼ãƒ‰ã‚¨ãƒªã‚¢
 
 	int m_ncDataBlock;
 	BYTE m_byBlockMode[MAX_DATACODEWORD];
 	int m_nBlockLength[MAX_DATACODEWORD];
 
-	int m_ncAllCodeWord; // ‘ƒR[ƒhƒ[ƒh”(‚q‚rŒë‚è’ù³ƒf[ƒ^‚ðŠÜ‚Þ)
-	BYTE m_byAllCodeWord[MAX_ALLCODEWORD]; // ‘ƒR[ƒhƒ[ƒhŽZoƒGƒŠƒA
-	BYTE m_byRSWork[MAX_CODEBLOCK]; // ‚q‚rƒR[ƒhƒ[ƒhŽZoƒ[ƒN
+	int m_ncAllCodeWord; // ç·ã‚³ãƒ¼ãƒ‰ãƒ¯ãƒ¼ãƒ‰æ•°(ï¼²ï¼³èª¤ã‚Šè¨‚æ­£ãƒ‡ãƒ¼ã‚¿ã‚’å«ã‚€)
+	BYTE m_byAllCodeWord[MAX_ALLCODEWORD]; // ç·ã‚³ãƒ¼ãƒ‰ãƒ¯ãƒ¼ãƒ‰ç®—å‡ºã‚¨ãƒªã‚¢
+	BYTE m_byRSWork[MAX_CODEBLOCK]; // ï¼²ï¼³ã‚³ãƒ¼ãƒ‰ãƒ¯ãƒ¼ãƒ‰ç®—å‡ºãƒ¯ãƒ¼ã‚¯
 
-// ƒf[ƒ^ƒGƒ“ƒR[ƒhŠÖ˜Aƒtƒ@ƒ“ƒNƒVƒ‡ƒ“
+// ãƒ‡ãƒ¼ã‚¿ã‚¨ãƒ³ã‚³ãƒ¼ãƒ‰é–¢é€£ãƒ•ã‚¡ãƒ³ã‚¯ã‚·ãƒ§ãƒ³
 public:
 	BOOL EncodeData(int nLevel, int nVersion, BOOL bAutoExtent, int nMaskingNo, LPCSTR lpsSource, int ncSource = 0);
 
@@ -140,7 +140,7 @@ private:
 
 	void GetRSCodeWord(LPBYTE lpbyRSWork, int ncDataCodeWord, int ncRSCodeWord);
 
-// ƒ‚ƒWƒ…[ƒ‹”z’uŠÖ˜Aƒtƒ@ƒ“ƒNƒVƒ‡ƒ“
+// ãƒ¢ã‚¸ãƒ¥ãƒ¼ãƒ«é…ç½®é–¢é€£ãƒ•ã‚¡ãƒ³ã‚¯ã‚·ãƒ§ãƒ³
 private:
 	void FormatModule();
 
