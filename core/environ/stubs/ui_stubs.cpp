@@ -56,8 +56,17 @@ extern "C" void TVPEngineApiNotifyWebStartupReady() __attribute__((weak));
 // ---------------------------------------------------------------------------
 // Live2D post-draw hook — called after scene blit in UpdateDrawBuffer
 // ---------------------------------------------------------------------------
-static void (*g_postDrawHook)() = nullptr;
-void TVPSetPostDrawHook(void (*hook)()) { g_postDrawHook = hook; }
+using PostDrawHook = void (*)();
+std::atomic<PostDrawHook> g_postDrawHook{nullptr};
+
+void TVPSetPostDrawHook(PostDrawHook hook) {
+    g_postDrawHook.store(hook, std::memory_order_release);
+}
+
+inline void InvokePostDrawHook() {
+    PostDrawHook hook = g_postDrawHook.load(std::memory_order_acquire);
+    if (hook != nullptr) hook();
+}
 
 namespace {
 std::mutex g_host_frame_mutex;
@@ -813,7 +822,7 @@ extern "C" void TVPHostResetForGameSession() {
     }
     g_host_window_owner = nullptr;
     g_host_window_owners.clear();
-    g_postDrawHook = nullptr;
+    TVPSetPostDrawHook(nullptr);
     spdlog::info("Host render state reset for next game session");
 }
 
@@ -1118,7 +1127,7 @@ public:
             // Raw publication changes only the host image. Keep the engine's
             // logical window/input surface unchanged.
             ApplyDrawDeviceSurfaceRect(dd, surface_rect, surface_w, surface_h);
-            if (g_postDrawHook) g_postDrawHook();
+            InvokePostDrawHook();
             return;
         }
         }
@@ -1128,7 +1137,7 @@ public:
         auto* dd = owner_->GetDrawDevice();
         if (!dd) return;
         ApplyDrawDeviceSurfaceRect(dd, surface_rect, surface_w, surface_h);
-        if (g_postDrawHook) g_postDrawHook();
+        InvokePostDrawHook();
         return;
 #else
         // Blit the composited scene texture to the render target.
@@ -1152,7 +1161,7 @@ public:
             auto* dd = owner_ ? owner_->GetDrawDevice() : nullptr;
             if (!dd) return;
             ApplyDrawDeviceSurfaceRect(dd, surface_rect, surface_w, surface_h);
-            if (g_postDrawHook) g_postDrawHook();
+            InvokePostDrawHook();
             return;
         }
 
@@ -1194,7 +1203,7 @@ public:
             auto* dd = owner_->GetDrawDevice();
             if (!dd) return;
             ApplyDrawDeviceSurfaceRect(dd, surface_rect, surface_w, surface_h);
-            if (g_postDrawHook) g_postDrawHook();
+            InvokePostDrawHook();
             return;
         }
 
@@ -1208,7 +1217,7 @@ public:
             auto* dd = owner_->GetDrawDevice();
             if (!dd) return;
             ApplyDrawDeviceSurfaceRect(dd, surface_rect, surface_w, surface_h);
-            if (g_postDrawHook) g_postDrawHook();
+            InvokePostDrawHook();
             return;
         }
 
@@ -1396,7 +1405,7 @@ public:
         glUseProgram(0);
         glBindTexture(GL_TEXTURE_2D, 0);
 
-        if (g_postDrawHook) g_postDrawHook();
+        InvokePostDrawHook();
 
         // In IOSurface/WindowSurface mode, glFlush() is sufficient —
         // IOSurface has GPU-GPU sync, and WindowSurface (SurfaceTexture)
