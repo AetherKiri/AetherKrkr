@@ -24,6 +24,7 @@
 #include <array>
 #include <limits>
 #include <map>
+#include <mutex>
 #include <vector>
 
 #include "TVPMmapAlloc.h"
