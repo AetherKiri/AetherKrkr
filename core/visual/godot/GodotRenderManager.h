@@ -76,6 +76,9 @@ public:
         return origTex;
     }
     uint64_t GetGodotGpuHandle() const { return gpu_handle_; }
+    // Monotonic content identity for host publication deduplication. It
+    // advances only when CPU or GPU writes make the texture observably newer.
+    uint64_t ContentSerial() const { return content_serial_; }
     bool HasGodotGpuHandle() const { return gpu_handle_ != 0; }
     bool HasCurrentCpuPixels() const {
         return !pixels_.empty() && (cpu_dirty_ || !gpu_dirty_);
@@ -142,10 +145,12 @@ public:
     bool UpdateGpuRgba(const void *pixels, uint32_t stride_bytes);
     void MarkGpuDirty() {
         CancelPendingGpuReadback();
+        ++content_serial_;
         gpu_dirty_ = true;
     }
     void MarkCpuDirty() {
         CancelPendingGpuReadback();
+        ++content_serial_;
         cpu_dirty_ = true;
         gpu_dirty_ = false;
         cpu_pixels_known_zero_ = false;
@@ -158,6 +163,7 @@ public:
     // unconditional MarkCpuDirty() above.
     void MarkCpuDirtyRect(const tTVPRect &rc) {
         CancelPendingGpuReadback();
+        ++content_serial_;
         cpu_dirty_ = true;
         gpu_dirty_ = false;
         cpu_pixels_known_zero_ = false;
@@ -228,6 +234,7 @@ private:
     // and clear the GPU image without packing and uploading a multi-megabyte
     // zero-filled staging buffer.
     bool cpu_pixels_known_zero_ = false;
+    uint64_t content_serial_ = 1;
     bool cpu_dirty_full_ = true;
     tTVPRect cpu_dirty_rect_{};
 };

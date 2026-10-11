@@ -87,6 +87,8 @@ uint64_t g_host_gpu_texture = 0;
 uint32_t g_host_gpu_width = 0;
 uint32_t g_host_gpu_height = 0;
 uint64_t g_host_gpu_serial = 0;
+uint64_t g_host_gpu_source_texture = 0;
+uint64_t g_host_gpu_source_content_serial = 0;
 uint32_t g_host_surface_width = 1920;
 uint32_t g_host_surface_height = 1080;
 bool g_host_prefer_gpu_frame = true;
@@ -644,6 +646,8 @@ bool StoreLatestCpuFrameFromTexture(iTVPTexture2D *tex) {
         g_host_gpu_texture = 0;
         g_host_gpu_width = 0;
         g_host_gpu_height = 0;
+        g_host_gpu_source_texture = 0;
+        g_host_gpu_source_content_serial = 0;
     }
     return true;
 }
@@ -664,13 +668,24 @@ void GetHostSurfaceSize(tjs_int fallback_w, tjs_int fallback_h,
     if (height <= 0) height = fallback_h;
 }
 
-void PublishHostGpuFrame(uint64_t texture, uint32_t width, uint32_t height) {
+void PublishHostGpuFrame(uint64_t texture, uint32_t width, uint32_t height,
+                         uint64_t source_texture,
+                         uint64_t source_content_serial) {
     uint64_t serial = 0;
     {
         std::lock_guard<std::mutex> lock(g_host_frame_mutex);
+        if (source_texture != 0 && source_content_serial != 0 &&
+            g_host_gpu_source_texture == source_texture &&
+            g_host_gpu_source_content_serial == source_content_serial &&
+            g_host_gpu_texture == texture && g_host_gpu_width == width &&
+            g_host_gpu_height == height) {
+            return;
+        }
         g_host_gpu_texture = texture;
         g_host_gpu_width = width;
         g_host_gpu_height = height;
+        g_host_gpu_source_texture = source_texture;
+        g_host_gpu_source_content_serial = source_content_serial;
         g_host_gpu_serial += 1;
         g_host_frame_rgba.clear();
         g_host_frame_width = width;
@@ -1139,7 +1154,9 @@ public:
             }
             PublishHostGpuFrame(output_tex->GetGodotGpuHandle(),
                                 static_cast<uint32_t>(output_tex->GetWidth()),
-                                static_cast<uint32_t>(output_tex->GetHeight()));
+                                static_cast<uint32_t>(output_tex->GetHeight()),
+                                godot_tex->GetGodotGpuHandle(),
+                                godot_tex->ContentSerial());
 
             auto* dd = owner_->GetDrawDevice();
             if (!dd) return;
@@ -1214,7 +1231,9 @@ public:
                 PublishHostGpuFrame(
                     output_tex->GetGodotGpuHandle(),
                     static_cast<uint32_t>(output_tex->GetWidth()),
-                    static_cast<uint32_t>(output_tex->GetHeight()));
+                    static_cast<uint32_t>(output_tex->GetHeight()),
+                    godot_tex->GetGodotGpuHandle(),
+                    godot_tex->ContentSerial());
             } else {
                 StoreLatestCpuFrameFromTexture(tex);
             }
@@ -1607,9 +1626,17 @@ private:
             surface_texture_ = new GodotTexture2D(
                 nullptr, 0, static_cast<unsigned int>(surface_w),
                 static_cast<unsigned int>(surface_h), TVPTextureFormat::RGBA);
+            surface_source_texture_ = 0;
+            surface_source_content_serial_ = 0;
         }
         if (!surface_texture_->EnsureGpuHandle()) {
             return nullptr;
+        }
+        const uint64_t source_texture = source->GetGodotGpuHandle();
+        const uint64_t source_content_serial = source->ContentSerial();
+        if (surface_source_texture_ == source_texture &&
+            surface_source_content_serial_ == source_content_serial) {
+            return surface_texture_;
         }
 
         const tTVPRect clip(0, 0, surface_w, surface_h);
@@ -1638,6 +1665,8 @@ private:
         // same ordered queue; flushing here split every animated frame into
         // several Metal submissions without making the frame any safer.
         surface_texture_->UploadCpuToGpu(false);
+        surface_source_texture_ = source_texture;
+        surface_source_content_serial_ = source_content_serial;
         return surface_texture_;
     }
 
@@ -1755,6 +1784,8 @@ private:
     tjs_int last_mouse_x_ = 0;
     tjs_int last_mouse_y_ = 0;
     GodotTexture2D *surface_texture_ = nullptr;
+    uint64_t surface_source_texture_ = 0;
+    uint64_t surface_source_content_serial_ = 0;
 
 #if defined(KRKR_ENABLE_GPU_BRIDGE)
     // Blit resources for rendering to external GPU targets.
