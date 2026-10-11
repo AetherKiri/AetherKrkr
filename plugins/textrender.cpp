@@ -516,6 +516,59 @@ EdgeShadowDrawTextCompat(tTJSVariant *result, tjs_int numparams,
   if (textIndex < 0) return TJS_E_BADPARAMCOUNT;
   textRenderLogEdgeShadowArgs(numparams, param, textIndex);
 
+  // KAG's message helper passes the original drawText callback, its layer,
+  // x/y/text/color/opacity/AA, then independent shadow and edge settings.
+  // Fade renderers use opacity=0 for the edge layer and a second eight-argument
+  // call for the ink. Shadow offsets (11/12) must never set the edge width (16).
+  if (textIndex == 4 && numparams >= 8 && param[0] &&
+      param[0]->Type() == tvtObject && param[1] &&
+      param[1]->Type() == tvtObject) {
+    const auto callback = param[0]->AsObjectClosureNoAddRef();
+    auto *target = param[1]->AsObjectNoAddRef();
+    if (!callback.Object || !target) return TJS_E_INVALIDPARAM;
+    const tjs_int x = *param[2];
+    const tjs_int y = *param[3];
+    const TextColor color = textRenderColorRaw(*param[5], 0xffffff);
+    const tjs_int opacity = std::clamp<tjs_int>(*param[6], 0, 255);
+    const bool antialiased = param[7]->Type() == tvtVoid ||
+                             param[7]->operator bool();
+    auto draw = [&](tjs_int dx, tjs_int dy, tjs_uint32 ink, tjs_int opa,
+                    tjs_int emphasis = 0, tjs_uint32 edge = 0,
+                    tjs_int width = 0) -> tjs_error {
+      tTJSVariant values[] = {dx, dy, *param[4], static_cast<tjs_int64>(ink),
+                             opa, antialiased, emphasis,
+                             static_cast<tjs_int64>(edge), width, 0, 0};
+      tTJSVariant *args[11];
+      for (int i = 0; i < 11; ++i) args[i] = &values[i];
+      return callback.FuncCall(0, nullptr, nullptr, nullptr, 11, args, target);
+    };
+    tjs_error status = TJS_S_OK;
+    if (numparams >= 13 && param[8]->operator bool()) {
+      const tjs_int width = *param[10];
+      const tjs_uint32 shadow = textRenderColor24(*param[9], 0);
+      status = draw(x + static_cast<tjs_int>(*param[11]),
+                    y + static_cast<tjs_int>(*param[12]), shadow, 255,
+                    width > 0 ? 255 * width : 0, shadow, width);
+      if (TJS_FAILED(status)) return status;
+    }
+    if (numparams >= 17 && param[13]->operator bool()) {
+      const tjs_uint32 edge = textRenderColor24(*param[14], 0);
+      status = draw(x, y, edge, 255, *param[15], edge, *param[16]);
+      if (TJS_FAILED(status)) return status;
+    }
+    if (opacity > 0) {
+      auto *layer = textRenderGetNativeLayer(target);
+      if (textRenderIsPackedGradient(color) && layer) {
+        textRenderDrawTextWithColor(layer, x, y, *param[4], color, opacity,
+                                    layer->GetTextHeight(*param[4]));
+      } else {
+        status = draw(x, y, textRenderColorBottom24(color), opacity);
+      }
+    }
+    if (result) *result = TJS_SUCCEEDED(status);
+    return status;
+  }
+
   tTJSNI_BaseLayer *layer =
       textRenderFindLayerArg(numparams, param, objthis);
   if (!layer) {
