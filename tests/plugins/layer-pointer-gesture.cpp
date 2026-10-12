@@ -134,6 +134,29 @@ TEST_CASE("a normal captured button dispatches once on mouse-up",
     CHECK(runtime.value(TJS_W("ups")) == 1);
 }
 
+TEST_CASE("an unavailable custom cursor cannot interrupt a pointer gesture",
+          "[input][gesture][cursor]") {
+    PointerRuntime runtime;
+    runtime.run(TJS_W("button.visible = true; button.cursor = -21;"));
+    SECTION("the optional cursor file is absent") {
+        runtime.run(TJS_W("var cursorFile = 'optional_missing_hand.cur';"));
+    }
+    SECTION("the optional cursor archive is absent") {
+        runtime.run(TJS_W(
+            "var cursorFile = 'optional_missing_cursors.xp3>hand.cur';"));
+    }
+    REQUIRE_NOTHROW(runtime.run(TJS_W("button.cursor = global.cursorFile;")));
+    runtime.down();
+    runtime.clickAndUp();
+    CHECK(runtime.value(TJS_W("button.cursor")) == 0);
+    CHECK(runtime.value(TJS_W("downs")) == 1);
+    CHECK(runtime.value(TJS_W("ups")) == 1);
+    CHECK(runtime.value(TJS_W("clicks")) == 1);
+
+    runtime.run(TJS_W("button.cursor = -21;"));
+    CHECK(runtime.value(TJS_W("button.cursor")) == -21);
+}
+
 TEST_CASE("a button that releases capture can still finish its own click",
           "[input][gesture]") {
     PointerRuntime runtime;

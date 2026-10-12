@@ -68,29 +68,10 @@ tjs_uint32 TVP_TShiftState_From_uint32(tjs_uint32 state) {
 //---------------------------------------------------------------------------
 // Mouse Cursor management
 //---------------------------------------------------------------------------
-static tTJSHashTable<ttstr, tjs_int> TVPCursorTable;
-tjs_int TVPGetCursor(const ttstr &name) {
-    // get placed path
-    ttstr place(TVPSearchPlacedPath(name));
-
-    // search in cache
-    tjs_int *in_hash = TVPCursorTable.Find(place);
-    if(in_hash)
-        return *in_hash;
-#if 0
-	// not found
-	tTVPLocalTempStorageHolder file(place);
-
-	HCURSOR handle = ::LoadCursorFromFile(file.GetLocalName().c_str());
-
-	if(!handle) TVPThrowExceptionMessage(TVPCannotLoadCursor, place);
-
-	int id = MouseCursor::AddCursor( handle );
-
-	TVPCursorTable.Add(place, id);
-
-	return id;
-#endif
+tjs_int TVPGetCursor(const ttstr &) {
+    // Custom cursor files are not loaded by the host window backend yet.
+    // Fall back before resolving storage: optional Win32 cursor resources
+    // may be absent, and a failed lookup must not abort a pointer handler.
     return 0;
 }
 //---------------------------------------------------------------------------

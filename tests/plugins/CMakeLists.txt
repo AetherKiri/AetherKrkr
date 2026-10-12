@@ -92,3 +92,10 @@ add_executable(layer-pointer-gesture main.cpp layer-pointer-gesture.cpp
 target_link_libraries(layer-pointer-gesture PRIVATE Catch2::Catch2 krkr2core
     ${_KRKR2PLUGIN_LINK_ITEM})
 catch_discover_tests(layer-pointer-gesture)
+
+# Exercise the script callback contract without fonts, a window, or GPU state.
+add_executable(textrender-edge-shadow main.cpp textrender-edge-shadow.cpp
+    ${_ENGINE_API_TEXT_TRANSFORM_SOURCE})
+target_link_libraries(textrender-edge-shadow PRIVATE Catch2::Catch2 krkr2core
+    ${_KRKR2PLUGIN_LINK_ITEM})
+catch_discover_tests(textrender-edge-shadow)
