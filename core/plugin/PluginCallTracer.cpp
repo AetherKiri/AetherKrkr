@@ -4,11 +4,17 @@
  */
 
 #include "PluginCallTracer.hpp"
+#include "DebugIntf.h"
 #include <spdlog/spdlog.h>
 #include <spdlog/sinks/basic_file_sink.h>
 #include <cstdlib>
 #include <cstring>
+#include <cstdio>
 #include <algorithm>
+#include <mutex>
+#include <set>
+#include <string>
+#include <vector>
 #include <sys/stat.h>
 
 namespace {
@@ -727,6 +733,104 @@ void PluginCallTracer::LogPluginLoad(const std::string &name, bool success,
         logger->flush();
     } catch (...) {
     }
+}
+
+//---------------------------------------------------------------------------
+// Compatibility receipts (see DebugIntf.h). They are logged through spdlog so
+// they land in the engine log that host diagnostics export tails, and kept in
+// a bounded list for engine_get_plugin_debug_info.
+//---------------------------------------------------------------------------
+namespace {
+struct TVPCompatReceipt {
+    std::string feature;
+    std::string state;
+    std::string detail;
+};
+
+std::mutex g_compat_receipt_mutex;
+std::vector<TVPCompatReceipt> &TVPCompatReceiptList() {
+    static std::vector<TVPCompatReceipt> receipts;
+    return receipts;
+}
+std::set<std::string> &TVPCompatReceiptKeySet() {
+    static std::set<std::string> keys;
+    return keys;
+}
+constexpr size_t TVPCompatReceiptLimit = 256;
+} // namespace
+
+const char *TVPCompatStateName(TJSCompatState state) {
+    switch(state) {
+        case TJSCompatState::Loaded:
+            return "loaded";
+        case TJSCompatState::Unimplemented:
+            return "unimplemented";
+        case TJSCompatState::Unavailable:
+            return "unavailable";
+        case TJSCompatState::Failed:
+            return "failed";
+    }
+    return "unknown";
+}
+
+void TVPAddCompatReceipt(const char *feature, TJSCompatState state,
+                         const char *detail) {
+    if(feature == nullptr || feature[0] == '\0')
+        return;
+    const std::string stateName(TVPCompatStateName(state));
+    const std::string detailText(detail != nullptr ? detail : "");
+    {
+        std::lock_guard<std::mutex> lock(g_compat_receipt_mutex);
+        const std::string key = std::string(feature) + "|" + stateName;
+        if(!TVPCompatReceiptKeySet().insert(key).second)
+            return; // already reported for this feature/state
+        if(TVPCompatReceiptList().size() < TVPCompatReceiptLimit)
+            TVPCompatReceiptList().push_back({feature, stateName, detailText});
+    }
+    try {
+        spdlog::info("[Compat] feature={} state={} detail={}", feature, stateName,
+                     detailText);
+    } catch(...) {
+        // logging must never break plugin loading
+    }
+}
+
+std::string TVPGetCompatReceiptsJSON() {
+    std::lock_guard<std::mutex> lock(g_compat_receipt_mutex);
+    const auto escape = [](const std::string &value) {
+        std::string out;
+        out.reserve(value.size() + 8);
+        for(char ch : value) {
+            switch(ch) {
+                case '"': out += "\\\""; break;
+                case '\\': out += "\\\\"; break;
+                case '\n': out += "\\n"; break;
+                case '\r': out += "\\r"; break;
+                case '\t': out += "\\t"; break;
+                default:
+                    if(static_cast<unsigned char>(ch) < 0x20) {
+                        char buffer[8];
+                        std::snprintf(buffer, sizeof(buffer), "\\u%04x",
+                                      static_cast<unsigned char>(ch));
+                        out += buffer;
+                    } else {
+                        out += ch;
+                    }
+            }
+        }
+        return out;
+    };
+    std::string json("[");
+    const auto &receipts = TVPCompatReceiptList();
+    for(size_t index = 0; index < receipts.size(); ++index) {
+        if(index != 0)
+            json += ",";
+        json += "{\"feature\":\"" + escape(receipts[index].feature) +
+                "\",\"state\":\"" + escape(receipts[index].state) +
+                "\",\"detail\":\"" + escape(receipts[index].detail) + "\"}";
+    }
+    json += "]";
+    return json;
 }
 
 void PluginCallTracer::LogMissingMember(const tjs_char *membername,
