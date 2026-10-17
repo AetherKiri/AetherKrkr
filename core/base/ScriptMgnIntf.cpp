@@ -2611,6 +2611,30 @@ static void TVPExecuteTextScriptWithRecovery(const ttstr &script,
     }
 }
 
+const tjs_char *TVPGetMessageEdgeArgumentPatchScript() {
+    return TJS_W(
+        "(function() {\r\n"
+        "\tif (typeof global.EdgeShadowDrawText == \"undefined\") return;\r\n"
+        "\tif (typeof global.__aetherKiriOrigEdgeShadowDrawText != \"undefined\") return;\r\n"
+        "\tglobal.__aetherKiriOrigEdgeShadowDrawText = &global.EdgeShadowDrawText;\r\n"
+        "\tglobal.EdgeShadowDrawText = function(dt, d, x, y, text, col, opa, aa, s, scol, sw, sx, sy, e, ecol, eemp, eext) {\r\n"
+        "\t\tif (typeof e == \"Integer\" && e != 0 && e != 1 && (ecol === void || ecol == 0 || ecol == 1)) {\r\n"
+        "\t\t\ttry {\r\n"
+        "\t\t\t\tvar owner = global.kag.fore.messages[0];\r\n"
+        "\t\t\t\tif (typeof owner != \"undefined\" && owner.edge !== void && owner.edgeColor !== void && e == owner.edgeColor && e != owner.edge) {\r\n"
+        "\t\t\t\t\te = owner.edge;\r\n"
+        "\t\t\t\t\tecol = owner.edgeColor;\r\n"
+        "\t\t\t\t}\r\n"
+        "\t\t\t} catch(ex) {}\r\n"
+        "\t\t}\r\n"
+        "\t\tif (typeof col == \"Integer\" && col < 0 && d && typeof d.EdgeShadowDrawText == \"Object\") {\r\n"
+        "\t\t\treturn d.EdgeShadowDrawText(dt, d, x, y, text, col, opa, aa, s, scol, sw, sx, sy, e, ecol, eemp, eext);\r\n"
+        "\t\t}\r\n"
+        "\t\treturn (global.__aetherKiriOrigEdgeShadowDrawText incontextof this)(dt, d, x, y, text, col, opa, aa, s, scol, sw, sx, sy, e, ecol, eemp, eext);\r\n"
+        "\t};\r\n"
+        "})();\r\n");
+}
+
 const tjs_char *TVPGetD3DStandSourcePatchScript() {
     return TJS_W(
         "(function() {\r\n"
@@ -2976,24 +3000,7 @@ static void TVPApplyPostScriptCompatibilityPatches(const ttstr &shortname) {
 
     if(patchMessageText) try {
         TVPExecuteScript(
-            TJS_W(
-                "(function() {\r\n"
-                "\tif (typeof global.EdgeShadowDrawText == \"undefined\") return;\r\n"
-                "\tif (typeof global.__aetherKiriOrigEdgeShadowDrawText != \"undefined\") return;\r\n"
-                "\tglobal.__aetherKiriOrigEdgeShadowDrawText = &global.EdgeShadowDrawText;\r\n"
-                "\tglobal.EdgeShadowDrawText = function(dt, d, x, y, text, col, opa, aa, s, scol, sw, sx, sy, e, ecol, eemp, eext) {\r\n"
-                "\t\tif (typeof e == \"Integer\" && e != 0 && e != 1 && (ecol === void || ecol == 0 || ecol == 1)) {\r\n"
-                "\t\t\ttry {\r\n"
-                "\t\t\t\tvar owner = global.kag.fore.messages[0];\r\n"
-                "\t\t\t\tif (typeof owner != \"undefined\" && owner.edge !== void && owner.edgeColor !== void && e == owner.edgeColor && e != owner.edge) {\r\n"
-                "\t\t\t\t\te = owner.edge;\r\n"
-                "\t\t\t\t\tecol = owner.edgeColor;\r\n"
-                "\t\t\t\t}\r\n"
-                "\t\t\t} catch(ex) {}\r\n"
-                "\t\t}\r\n"
-                "\t\treturn (global.__aetherKiriOrigEdgeShadowDrawText incontextof this)(dt, d, x, y, text, col, opa, aa, s, scol, sw, sx, sy, e, ecol, eemp, eext);\r\n"
-                "\t};\r\n"
-                "})();\r\n"),
+            TVPGetMessageEdgeArgumentPatchScript(),
             TJS_W("AetherKiriMessageEdgeArgumentPatch"), 0,
             (tTJSVariant *)nullptr);
         spdlog::info(

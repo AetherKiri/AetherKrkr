@@ -59,6 +59,49 @@ bool noMovieExists(const ttstr &) { return false; }
 
 } // namespace
 
+TEST_CASE("Packed message colors use the layer renderer with intact arguments",
+          "[textrender][gradient-routing]") {
+    ScriptEngineOwner engine;
+    ScriptEngineBinding binding(engine.operator->());
+    engine->ExecScript(TJS_W(
+        "var nativeCalls = 0, originalCalls = 0, routed = void;"
+        "function EdgeShadowDrawText(*) { originalCalls++; return 41; }"
+        "class GradientTarget {"
+        " function EdgeShadowDrawText(dt,d,x,y,text,col,opa,aa,s,scol,sw,sx,sy,e,ecol,eemp,eext) {"
+        "  nativeCalls++; routed=[d===this,x,y,text,col,opa,aa,s,scol,sw,sx,sy,e,ecol,eemp,eext];"
+        "  return 42; } }"
+        "var target = new GradientTarget();"));
+    REQUIRE_NOTHROW(engine->ExecScript(TVPGetMessageEdgeArgumentPatchScript()));
+    // Loading the same script twice must not wrap it recursively.
+    REQUIRE_NOTHROW(engine->ExecScript(TVPGetMessageEdgeArgumentPatchScript()));
+    CHECK(evaluateInteger(engine.operator->(), TJS_W(
+        "EdgeShadowDrawText(void,target,11,23,'A',0x8000f3759cfc9ec8,0,0,1,0x123456,2,-3,4,1,0xffffff,4096,3)")) == 42);
+    CHECK(evaluateInteger(engine.operator->(), TJS_W(
+        "nativeCalls == 1 && originalCalls == 0 && routed[0] &&"
+        "routed[1] == 11 && routed[2] == 23 && routed[3] == 'A' &&"
+        "routed[4] == 0x8000f3759cfc9ec8 && routed[5] == 0 && routed[6] == 0 &&"
+        "routed[7] == 1 && routed[8] == 0x123456 && routed[9] == 2 &&"
+        "routed[10] == -3 && routed[11] == 4 && routed[12] == 1 &&"
+        "routed[13] == 0xffffff && routed[14] == 4096 && routed[15] == 3")) == 1);
+}
+
+TEST_CASE("Message color routing preserves RGB and missing-renderer fallbacks",
+          "[textrender][gradient-routing]") {
+    ScriptEngineOwner engine;
+    ScriptEngineBinding binding(engine.operator->());
+    engine->ExecScript(TJS_W(
+        "var calls = 0; function EdgeShadowDrawText(*) { calls++; return 41; }"
+        "var target = %[];"));
+    REQUIRE_NOTHROW(engine->ExecScript(TVPGetMessageEdgeArgumentPatchScript()));
+    CHECK(evaluateInteger(engine.operator->(), TJS_W(
+        "EdgeShadowDrawText(void,target,0,0,'A',0x8000000000707070,255,1)")) == 41);
+    engine->ExecScript(TJS_W(
+        "target.EdgeShadowDrawText = function(*) { return 42; };"));
+    CHECK(evaluateInteger(engine.operator->(), TJS_W(
+        "EdgeShadowDrawText(void,target,0,0,'A',0,255,1)")) == 41);
+    CHECK(evaluateInteger(engine.operator->(), TJS_W("calls")) == 2);
+}
+
 TEST_CASE("Dictionary read labels named after globals stay void") {
     ScriptEngineOwner engine;
     ScriptEngineBinding binding(engine.operator->());
