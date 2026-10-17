@@ -1118,8 +1118,10 @@ void *GodotTexture2D::GetScanLineForWrite(tjs_uint l) {
     if (l >= static_cast<tjs_uint>(Height) || pixels_.empty()) return nullptr;
     retain_cpu_shadow_ = true;
     MarkOpacityUnknown();
-    MarkCpuDirtyRect(tTVPRect(0, static_cast<tjs_int>(l), Width,
-                              static_cast<tjs_int>(l) + 1));
+    // This is a pointer into the contiguous bitmap, not a bounded row view.
+    // Native plugins and software operations walk further rows using pitch
+    // (for example to apply a mask), so their write extent is unknown here.
+    MarkCpuDirty();
     return pixels_.data() + static_cast<size_t>(l) * pitch_;
 }
 
@@ -1130,8 +1132,7 @@ void *GodotTexture2D::GetScanLineForWriteUninitialized(tjs_uint l) {
     if (pixels_.empty()) return nullptr;
     retain_cpu_shadow_ = true;
     MarkOpacityUnknown();
-    MarkCpuDirtyRect(tTVPRect(0, static_cast<tjs_int>(l), Width,
-                              static_cast<tjs_int>(l) + 1));
+    MarkCpuDirty();
     return pixels_.data() + static_cast<size_t>(l) * pitch_;
 }
 

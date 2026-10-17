@@ -51,6 +51,7 @@ bool g_reject_batch = false;
 bool g_throw_batch_end = false;
 uint64_t g_last_batch_token = 0;
 std::vector<GpuCall> g_gpu_calls;
+std::vector<std::uint8_t> g_uploaded_texture_pixels;
 
 uint64_t CreateTestTexture(uint32_t, uint32_t, const void *pixels, uint32_t) {
     g_last_create_pixels_were_null = pixels == nullptr;
@@ -62,6 +63,11 @@ void ReleaseTestTexture(uint64_t) {}
 bool ReadTestGrayTexture(uint64_t, void *out_pixels, size_t out_pixels_size,
                          uint32_t stride_bytes) {
     ++g_read_rgba_calls;
+    if(!g_uploaded_texture_pixels.empty() && out_pixels != nullptr &&
+       out_pixels_size == g_uploaded_texture_pixels.size()) {
+        std::memcpy(out_pixels, g_uploaded_texture_pixels.data(), out_pixels_size);
+        return true;
+    }
     if(out_pixels == nullptr || out_pixels_size < 24 || stride_bytes != 12)
         return false;
 
@@ -73,9 +79,17 @@ bool ReadTestGrayTexture(uint64_t, void *out_pixels, size_t out_pixels_size,
     return true;
 }
 
-bool UpdateTestTexture(uint64_t, const void *, uint32_t,
-                       const tTVPRect *) {
+bool UpdateTestTexture(uint64_t, const void *pixels, uint32_t pitch,
+                       const tTVPRect *rect) {
     ++g_update_rgba_calls;
+    if(!g_uploaded_texture_pixels.empty() && pixels != nullptr && rect != nullptr) {
+        const auto *source = static_cast<const std::uint8_t *>(pixels);
+        for(int y = rect->top; y < rect->bottom; ++y) {
+            const size_t offset = static_cast<size_t>(y) * pitch + rect->left * 4u;
+            std::memcpy(g_uploaded_texture_pixels.data() + offset,
+                        source + offset, rect->get_width() * 4u);
+        }
+    }
     return true;
 }
 
@@ -176,6 +190,7 @@ public:
         g_throw_batch_end = false;
         g_last_batch_token = 0;
         g_gpu_calls.clear();
+        g_uploaded_texture_pixels.clear();
         TVPGodotGpuBridgeCallbacks callbacks{};
         callbacks.create_rgba = CreateTestTexture;
         callbacks.release_texture = ReleaseTestTexture;
@@ -1007,6 +1022,41 @@ TEST_CASE("Godot textures retain CPU shadows after script writes") {
     REQUIRE(second != nullptr);
     CHECK(g_read_rgba_calls == reads_after_first_write);
     CHECK(second[0] == 9);
+}
+
+TEST_CASE("Godot writable bitmap pointers upload edits beyond the first scanline") {
+    constexpr int width = 256;
+    constexpr int height = 256;
+    constexpr int pitch = width * 4;
+    for(const bool uninitialized : {false, true}) {
+        for(const bool explicit_upload : {false, true}) {
+            CAPTURE(uninitialized, explicit_upload);
+            TestGpuBridge bridge;
+            std::vector<std::uint8_t> pixels(pitch * height, 255);
+            GodotTexture2D texture(pixels.data(), pitch, width, height,
+                                   TVPTextureFormat::RGBA);
+            texture.ExpectCpuAccess();
+            REQUIRE(texture.EnsureGpuHandle());
+            g_uploaded_texture_pixels = pixels;
+            REQUIRE(g_uploaded_texture_pixels[(height - 1) * pitch + 3] == 255);
+            // Materialize the CPU shadow before requesting an uninitialized
+            // pointer, whose contract permits skipping a GPU readback.
+            REQUIRE(texture.GetScanLineForRead(0) != nullptr);
+
+            auto *buffer = static_cast<std::uint8_t *>(uninitialized
+                ? texture.GetScanLineForWriteUninitialized(1)
+                : texture.GetScanLineForWrite(1));
+            REQUIRE(buffer != nullptr);
+            // Native plugins obtain one pointer and walk the contiguous bitmap
+            // with its pitch. Later mask edits must reach GPU composition too.
+            buffer[(height - 2) * pitch + 3] = 0;
+
+            REQUIRE((explicit_upload ? texture.UploadCpuToGpu()
+                                     : texture.EnsureGpuHandle()));
+            CHECK(g_uploaded_texture_pixels[(height - 1) * pitch + 3] == 0);
+            CHECK(g_uploaded_texture_pixels[3] == 255);
+        }
+    }
 }
 
 TEST_CASE("Godot Gray textures update reused GPU glyph masks") {
