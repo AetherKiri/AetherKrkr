@@ -24,6 +24,13 @@ add_subdirectory(
 
 add_library(${PROJECT_NAME} STATIC)
 
+# windows.h (pulled in via psdclass.h/psdparse.h) defines min/max macros that
+# mangle std::min and std::numeric_limits<...>::max() in psdclass_loadstream.
+# Define NOMINMAX before any header include on this MSVC target.
+if(MSVC)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE NOMINMAX)
+endif()
+
 target_sources(${PROJECT_NAME} PRIVATE
     main.cpp
     psdclass.cpp
