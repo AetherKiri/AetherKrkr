@@ -14,6 +14,8 @@
 #include "tjsNative.h"
 #include "tjs.h"
 
+#include <string>
+
 //---------------------------------------------------------------------------
 // global definitions
 //---------------------------------------------------------------------------
@@ -26,6 +28,36 @@ extern void TVPSetOnLog(void (*func)(const ttstr &line));
 TJS_EXP_FUNC_DEF(void, TVPAddLog, (const ttstr &line));
 
 TJS_EXP_FUNC_DEF(void, TVPAddImportantLog, (const ttstr &line));
+
+//---------------------------------------------------------------------------
+// Compatibility receipts
+//
+// Platform-limited plugin paths must state why a feature is missing instead of
+// only returning a failure constant: a silent `false` (or worse, a silent
+// `true`) is read by game scripts as "the feature exists but the result was
+// empty". Each receipt is emitted once per feature/state with a stable,
+// greppable form:
+//
+//     [Compat] feature=<name> state=<loaded|unimplemented|unavailable|failed> detail=<text>
+//
+// The receipts are also available as a JSON array for host diagnostics
+// (`TVPGetCompatReceiptsJSON`), which engine_get_plugin_debug_info includes.
+//---------------------------------------------------------------------------
+enum class TJSCompatState {
+    Loaded,        // the real implementation is active (no receipt emitted)
+    Unimplemented, // a compatibility/mock stub accepts the call without doing the work
+    Unavailable,   // this build/runtime provides no implementation at all
+    Failed,        // an implementation exists but loading or initialising failed
+};
+
+extern const char *TVPCompatStateName(TJSCompatState state);
+
+// Emits the receipt once per (feature, state) pair; later calls are ignored.
+extern void TVPAddCompatReceipt(const char *feature, TJSCompatState state,
+                                const char *detail);
+
+// Formatted receipts as a JSON array string, for diagnostics payloads.
+extern std::string TVPGetCompatReceiptsJSON();
 
 extern ttstr TVPGetLastLog(tjs_uint n);
 
