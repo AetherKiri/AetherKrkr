@@ -282,12 +282,10 @@ void TVPSaveAsJXR(void *formatdata, tTJSBinaryStream *dst,
             const UINT stride = width * sizeof(tjs_uint32);
             const UINT buffersize = stride * height;
             if(SUCCEEDED(hr)) {
-#ifdef _DEBUG
+                // reserve() leaves size()==0, so writing through &buff[i] was
+                // undefined and release builds then read bytes the debug build
+                // had zero-initialized. Keep one sized buffer for both.
                 std::vector<tjs_uint8> buff(buffersize);
-#else
-                std::vector<tjs_uint8> buff;
-                buff.reserve(buffersize);
-#endif
                 for(UINT i = 0; i < height; i++) {
                     memcpy(&buff[i * stride], image->GetScanLine(i), stride);
                 }
@@ -663,12 +661,9 @@ void TVPLoadJXR(void *formatdata, void *callbackdata,
                      pDecoder->WMP.wmiSCP.uAlphaMode ? gpfRGBA : gpfRGB);
         const tjs_uint32 stride = GetStride((tjs_uint32)width, (tjs_uint32)32);
         PKRect rect = { 0, 0, width, height };
-#ifdef _DEBUG
+        // See the encoder path below: a reserve-only buffer is written through
+        // out of range, so size it for both build types.
         std::vector<tjs_uint8> buff(stride * height * sizeof(tjs_uint8));
-#else
-        std::vector<tjs_uint8> buff;
-        buff.reserve(stride * height * sizeof(tjs_uint8));
-#endif
         // rect
         // で1ラインずつ指定してデコードする方法はjxrlibではうまくいかない様子
         int offset = 0;
@@ -854,12 +849,9 @@ void TVPSaveAsJXR(void *formatdata, tTJSBinaryStream *dst,
         // Float rX = 98.0, rY = 98.0;
         // pEncoder->SetResolution(pEncoder, rX, rY);
 
-#ifdef _DEBUG
+        // Size the staging buffer for every build type; writing into a
+        // reserve-only vector was undefined behavior in release builds.
         std::vector<tjs_uint8> buff(buffersize);
-#else
-        std::vector<tjs_uint8> buff;
-        buff.reserve(buffersize);
-#endif
         for(tjs_uint i = 0; i < height; i++) {
             memcpy(&buff[i * stride], image->GetScanLine(i), stride);
         }
