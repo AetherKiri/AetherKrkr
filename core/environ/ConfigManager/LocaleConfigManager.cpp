@@ -54,12 +54,10 @@ LocaleConfigManager *LocaleConfigManager::GetInstance() {
 }
 
 const std::string &LocaleConfigManager::GetText(const std::string &tid) {
-    // Memoize the id as its own text on first use. A single lookup keeps the
-    // hot text path from hashing the same key twice; unordered_map references
-    // survive rehash, so the returned reference stays valid.
     auto it = AllConfig.find(tid);
     if (it == AllConfig.end()) {
-        it = AllConfig.emplace(tid, tid).first;
+        AllConfig[tid] = tid;
+        return AllConfig[tid];
     }
     return it->second;
 }
