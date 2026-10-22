@@ -4119,7 +4119,18 @@ void TVPExecuteStartupScript() {
     // execute "startup.tjs"
     try {
 
-        ttstr place(TVPSearchPlacedPath(TVPStartupScriptName));
+        ttstr startupScript = TVPStartupScriptName;
+        ttstr place(TVPGetPlacedPath(startupScript));
+        // Some packages have no startup script and enter KAG directly.
+        // Select that entry point before executing anything: retrying after
+        // a script error repeats partially completed initialization and
+        // hides the original failure behind an unrelated framework error.
+        if(place.IsEmpty() &&
+           TVPIsExistentStorage(TJS_W("system/Initialize.tjs"))) {
+            startupScript = TJS_W("system/Initialize.tjs");
+            place = TVPSearchPlacedPath(startupScript);
+            spdlog::info("Startup script absent; using system/Initialize.tjs");
+        }
         spdlog::info("Loading startup script: {}", place.AsStdString());
 #if defined(__ANDROID__)
         __android_log_print(ANDROID_LOG_INFO, "krkr2",
@@ -4131,68 +4142,13 @@ void TVPExecuteStartupScript() {
             tTVPStartupScriptPhaseGuard startup_phase_guard(
                 TVPExecutingStartupScript);
             try {
-                iTJSTextReadStream *stream = TVPCreateTextStreamForRead(place, "");
-                stream->Destruct();
-                TVPExecuteStorage(TVPStartupScriptName);
+                // TVPExecuteStorage handles both text and compiled TJS.
+                TVPExecuteStorage(startupScript);
                 TVPStartupSuccess = true;
             } catch(const TJS::eTJSScriptError &e) {
                 TVPLogStartupScriptError("Startup script error", e);
-                if(!TVPIsExistentStorage(TJS_W("system/Initialize.tjs"))) {
-                    throw;
-                }
-                spdlog::warn("Startup script failed; falling back to system/Initialize.tjs");
-                spdlog::default_logger()->flush();
-            } catch(const TJS::eTJS &e) {
-                spdlog::error("Startup script TJS error: {}", e.GetMessage().AsStdString());
-                spdlog::default_logger()->flush();
-                if(!TVPIsExistentStorage(TJS_W("system/Initialize.tjs"))) {
-                    throw;
-                }
-                spdlog::warn("Startup script failed; falling back to system/Initialize.tjs");
-                spdlog::default_logger()->flush();
-            } catch(const std::exception &e) {
-                spdlog::error("Startup script std::exception: {}", e.what());
-                spdlog::default_logger()->flush();
-                if(!TVPIsExistentStorage(TJS_W("system/Initialize.tjs"))) {
-                    throw;
-                }
-                spdlog::warn("Startup script failed; falling back to system/Initialize.tjs");
-                spdlog::default_logger()->flush();
-            } catch(const char *e) {
-                spdlog::error("Startup script const char exception: {}", e);
-                spdlog::default_logger()->flush();
-                if(!TVPIsExistentStorage(TJS_W("system/Initialize.tjs"))) {
-                    throw;
-                }
-                spdlog::warn("Startup script failed; falling back to system/Initialize.tjs");
-                spdlog::default_logger()->flush();
-            } catch(const tjs_char *e) {
-                spdlog::error("Startup script tjs_char exception: {}", ttstr(e).AsStdString());
-                spdlog::default_logger()->flush();
-                if(!TVPIsExistentStorage(TJS_W("system/Initialize.tjs"))) {
-                    throw;
-                }
-                spdlog::warn("Startup script failed; falling back to system/Initialize.tjs");
-                spdlog::default_logger()->flush();
-            } catch(...) {
-                spdlog::error("Startup script unknown exception");
-                spdlog::default_logger()->flush();
-                if(!TVPIsExistentStorage(TJS_W("system/Initialize.tjs"))) {
-                    throw;
-                }
-                spdlog::warn("Startup script failed; falling back to system/Initialize.tjs");
-                spdlog::default_logger()->flush();
+                throw;
             }
-        }
-        if(!TVPStartupSuccess) {
-            // try direct execute initialize.tjs to compatible for
-            // some patch
-#if defined(__ANDROID__)
-            __android_log_print(ANDROID_LOG_INFO, "krkr2",
-                                "Fallback startup script: system/Initialize.tjs");
-#endif
-            TVPExecuteStorage(TJS_W("system/Initialize.tjs"));
-            TVPStartupSuccess = true;
         }
         spdlog::info("Startup script ended.");
         TVPInstallKagRuntimeDefaults();
