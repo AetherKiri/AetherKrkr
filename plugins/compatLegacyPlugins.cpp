@@ -360,27 +360,13 @@ NCB_REGISTER_CLASS(KZTouch) {
 
 class DMMCloud {
 public:
-    bool getAvailable() const {
-        TVPAddCompatReceipt("dmmcloud.dll", TJSCompatState::Unavailable,
-                            "DMM cloud service is not provided by this build");
-        return false;
-    }
-    bool initialize(const tjs_char * = nullptr) {
-        TVPAddCompatReceipt("dmmcloud.dll", TJSCompatState::Unavailable,
-                            "DMM cloud service is not provided by this build");
-        return false;
-    }
+    bool getAvailable() const { return false; }
+    bool initialize(const tjs_char * = nullptr) { return false; }
     bool login(const tjs_char * = nullptr, const tjs_char * = nullptr) {
-        TVPAddCompatReceipt("dmmcloud.dll", TJSCompatState::Unavailable,
-                            "DMM cloud service is not provided by this build");
         return false;
     }
     bool logout() { return true; }
-    bool purchase(const tjs_char * = nullptr) {
-        TVPAddCompatReceipt("dmmcloud.dll", TJSCompatState::Unavailable,
-                            "DMM cloud service is not provided by this build");
-        return false;
-    }
+    bool purchase(const tjs_char * = nullptr) { return false; }
     ttstr getUserId() const { return ttstr(); }
 };
 
@@ -402,8 +388,6 @@ public:
     static tjs_error TJS_INTF_METHOD subImageCb(tTJSVariant *result, tjs_int,
                                                 tTJSVariant **,
                                                 iTJSDispatch2 *) {
-        TVPAddCompatReceipt("layerExSubImage.dll", TJSCompatState::Unimplemented,
-                            "sub-image call accepted without copying pixels");
         setBoolResult(result, true);
         return TJS_S_OK;
     }
@@ -422,8 +406,6 @@ class LayerColorCompat {
 public:
     static tjs_error TJS_INTF_METHOD colorCb(tTJSVariant *result, tjs_int,
                                              tTJSVariant **, iTJSDispatch2 *) {
-        TVPAddCompatReceipt("layerExColor.dll", TJSCompatState::Unimplemented,
-                            "color operation accepted without changing pixels");
         setBoolResult(result, true);
         return TJS_S_OK;
     }
@@ -443,8 +425,6 @@ public:
     static tjs_error TJS_INTF_METHOD mosaicCb(tTJSVariant *result, tjs_int,
                                               tTJSVariant **,
                                               iTJSDispatch2 *) {
-        TVPAddCompatReceipt("layerExMosaic.dll", TJSCompatState::Unimplemented,
-                            "mosaic operation accepted without changing pixels");
         setBoolResult(result, true);
         return TJS_S_OK;
     }
