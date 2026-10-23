@@ -526,10 +526,12 @@ public:
                        const iTVPBaseBitmap *src, const tTVPRect &srcrect) {
         const int srcwidth = srcrect.get_width();
         const int dstheight = destrect.get_height();
-        // reserve() leaves size()==0 and the sampler writes the whole row
-        // through &work[0]; size the scratch row for every build type so
-        // release matches the debug build's zero-initialized behaviour.
+#ifdef _DEBUG
         std::vector<tjs_uint32> work(srcwidth);
+#else
+        std::vector<tjs_uint32> work;
+        work.reserve(srcwidth);
+#endif
         const float *wstarty = &paramy_.weight_[0];
         // クリッピング部分スキップ
         for(int y = 0; y < clip.offsety_; y++) {
@@ -549,9 +551,12 @@ public:
                 dstbits += dststride;
             }
         } else { // 単純コピー以外は、一度テンポラリに書き出してから合成する
-            // Sized temp row: the horizontal sampler writes it through a raw
-            // pointer, which is undefined for a reserve-only vector.
+#ifdef _DEBUG
             std::vector<tjs_uint32> dstwork(clip.getDestWidth());
+#else
+            std::vector<tjs_uint32> dstwork;
+            dstwork.reserve(clip.getDestWidth());
+#endif
             tjs_uint32 *midbits = &dstwork[0]; // 途中処理用バッファ
             for(int y = clip.offsety_; y < clip.height_; y++) {
                 samplingVertical(y, workbits, dstheight, srcwidth, src, srcrect,
@@ -731,8 +736,12 @@ void TJS_USERENTRY ResamplerFunc(void *p) {
             dstbits += dststride;
         }
     } else { // 単純コピー以外
-        // Worker-thread path of the same sized temp row (see above).
+#ifdef _DEBUG
         std::vector<tjs_uint32> dstwork(param->clip_->getDestWidth());
+#else
+        std::vector<tjs_uint32> dstwork;
+        dstwork.reserve(param->clip_->getDestWidth());
+#endif
         tjs_uint32 *midbits = &dstwork[0]; // 途中処理用バッファ
         for(int y = param->start_; y < param->end_; y++) {
             param->sampler_->samplingVertical(y, workbits, dstheight, srcwidth,

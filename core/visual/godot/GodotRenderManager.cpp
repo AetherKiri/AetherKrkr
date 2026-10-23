@@ -1233,7 +1233,7 @@ bool GodotTexture2D::ClearGpu(uint32_t rgba, const tTVPRect &rc) {
     if (bridge == nullptr || bridge->clear_rgba == nullptr) return false;
     if (!bridge->clear_rgba(gpu_handle_, rgba, &rc)) return false;
     CancelPendingGpuReadback();
-    MarkGpuDirty();
+    gpu_dirty_ = true;
     cpu_dirty_ = false;
     if (IsFullTextureRect(rc, Width, Height)) {
         ((rgba >> 24) & 0xffu) == 0xffu ? MarkOpaqueKnown()
@@ -1255,7 +1255,7 @@ bool GodotTexture2D::CopyGpuFrom(GodotTexture2D *src, const tTVPRect &dst_rc,
         return false;
     }
     CancelPendingGpuReadback();
-    MarkGpuDirty();
+    gpu_dirty_ = true;
     cpu_dirty_ = false;
     if (IsFullTextureRect(dst_rc, Width, Height) &&
         IsFullTextureRect(src_rc, src->Width, src->Height)) {
@@ -1283,7 +1283,7 @@ bool GodotTexture2D::CopyTrianglesGpuFrom(GodotTexture2D *src,
         return false;
     }
     CancelPendingGpuReadback();
-    MarkGpuDirty();
+    gpu_dirty_ = true;
     cpu_dirty_ = false;
     MarkOpacityUnknown();
     return true;
@@ -1331,7 +1331,7 @@ bool GodotTexture2D::DrawTrianglesGpuFrom(GodotTexture2D *src,
         return false;
     }
     CancelPendingGpuReadback();
-    MarkGpuDirty();
+    gpu_dirty_ = true;
     cpu_dirty_ = false;
     MarkOpacityUnknown();
     return true;
@@ -1356,7 +1356,7 @@ bool GodotTexture2D::DrawExternalTrianglesGpuFrom(
         return false;
     }
     CancelPendingGpuReadback();
-    MarkGpuDirty();
+    gpu_dirty_ = true;
     cpu_dirty_ = false;
     MarkOpacityUnknown();
     return true;
@@ -1390,7 +1390,7 @@ bool GodotTexture2D::DrawMaskedTrianglesGpuFrom(
         return false;
     }
     CancelPendingGpuReadback();
-    MarkGpuDirty();
+    gpu_dirty_ = true;
     cpu_dirty_ = false;
     MarkOpacityUnknown();
     return true;
@@ -1417,7 +1417,7 @@ bool GodotTexture2D::BlendGpuFrom(GodotTexture2D *src, const tTVPRect &dst_rc,
         return false;
     }
     CancelPendingGpuReadback();
-    MarkGpuDirty();
+    gpu_dirty_ = true;
     cpu_dirty_ = false;
     MarkOpacityUnknown();
     return true;
@@ -1440,7 +1440,7 @@ bool GodotTexture2D::BlendGpuFrom2(GodotTexture2D *src1, GodotTexture2D *src2,
         return false;
     }
     CancelPendingGpuReadback();
-    MarkGpuDirty();
+    gpu_dirty_ = true;
     cpu_dirty_ = false;
     MarkOpacityUnknown();
     return true;
@@ -1465,7 +1465,7 @@ bool GodotTexture2D::BlendGpuFrom3(
         return false;
     }
     CancelPendingGpuReadback();
-    MarkGpuDirty();
+    gpu_dirty_ = true;
     cpu_dirty_ = false;
     MarkOpacityUnknown();
     return true;
@@ -1553,7 +1553,7 @@ bool GodotTexture2D::UpdateGpuRgba(const void *pixels,
         }
     }
     CancelPendingGpuReadback();
-    MarkGpuDirty();
+    gpu_dirty_ = true;
     cpu_dirty_ = false;
     DiscardCpuStorage();
     MarkOpacityUnknown();

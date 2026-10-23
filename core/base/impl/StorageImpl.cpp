@@ -15,6 +15,7 @@
 #include <cctype>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <algorithm>
 #include <set>
 #include <sys/stat.h>
@@ -1738,10 +1739,23 @@ void TVPAutoMountSiblingXP3Archives() {
     struct dirent *dp;
     while((dp = readdir(dirp))) {
         std::string name = dp->d_name;
-        if(name.size() < 5) continue;
-        std::string ext = name.substr(name.size() - 4);
-        for(auto &c : ext) c = (char)tolower((unsigned char)c);
-        if(ext != ".xp3") continue;
+        if(name == "." || name == "..") continue;
+        const auto nativePath = std::filesystem::u8path(parentPath) /
+                                std::filesystem::u8path(name);
+        std::error_code error;
+        if(!std::filesystem::is_regular_file(nativePath, error)) continue;
+        if(TVPLowerASCII(nativePath.extension().u8string()) != ".xp3") {
+            // Some packages keep an ordinary XP3 in a .bin/.dat file.
+            // Probe only the header, rather than scanning arbitrary sibling
+            // executables for bound archives or trusting their extension.
+            static constexpr unsigned char signature[] = {
+                'X', 'P', '3', '\r', '\n', ' ', '\n', 0x1a, 0x8b, 0x67, 1};
+            unsigned char header[sizeof(signature)];
+            std::ifstream input(nativePath, std::ios::binary);
+            if(!input.read(reinterpret_cast<char *>(header), sizeof(header)) ||
+               std::memcmp(header, signature, sizeof(signature)) != 0)
+                continue;
+        }
 
         xp3Names.push_back(name);
     }

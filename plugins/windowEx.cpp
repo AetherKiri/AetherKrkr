@@ -1657,9 +1657,27 @@ struct Scripts {
     }
 
     static void UnRegist() {
-        if(evalOrig)
-            evalOrig->Release();
+        if(!evalOrig)
+            return;
+        // The attached wrapper has just been removed by ncbind. Restore
+        // the engine method before releasing our saved reference, so a
+        // script can unload windowEx and continue evaluating KAG tags.
+        tTJSVariant original(evalOrig);
+        evalOrig->Release();
         evalOrig = nullptr;
+        iTJSDispatch2 *global = TVPGetScriptDispatch();
+        if(!global)
+            return;
+        tTJSVariant scripts;
+        const auto status = global->PropGet(
+            0, TJS_W("Scripts"), nullptr, &scripts, global);
+        global->Release();
+        if(TJS_SUCCEEDED(status) && scripts.Type() == tvtObject &&
+           scripts.AsObjectNoAddRef()) {
+            auto *dispatch = scripts.AsObjectNoAddRef();
+            dispatch->PropSet(TJS_MEMBERENSURE | TJS_STATICMEMBER,
+                              TJS_W("eval"), nullptr, &original, dispatch);
+        }
     }
 
     static iTJSDispatch2 *evalOrig;
