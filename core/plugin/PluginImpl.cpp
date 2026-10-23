@@ -20,6 +20,7 @@
 #include "PluginImpl.h"
 
 #include "StorageImpl.h"
+#include "XP3Archive.h"
 
 #include "EventIntf.h"
 #include "TransIntf.h"
@@ -693,6 +694,15 @@ void TVPLoadPlugin(const ttstr &name) {
 //---------------------------------------------------------------------------
 bool TVPUnloadPlugin(const ttstr &name) {
     ttstr normalizedShortName = TVPGetNormalizedPluginName(name);
+    // The host supplies sidecar XP3 decoding for the whole game session.
+    // Scripts may try to unlink every listed DLL after initialization, but
+    // an installed archive filter is still in use by later storage reads.
+    // Session teardown uses UnloadAllModules directly and releases it there.
+    if(normalizedShortName == TJS_W("xp3filter.dll") &&
+       TVPXP3ArchiveExtractionFilter != nullptr) {
+        spdlog::debug("Cannot unload xp3filter.dll while archive decoding is active");
+        return false;
+    }
     if(TVPIsProxyPluginName(normalizedShortName)) {
         TVPRegisteredPlugins.erase(normalizedShortName);
         if(!TVPHasRegisteredProxyPluginAlias())

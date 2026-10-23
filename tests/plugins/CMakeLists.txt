@@ -81,7 +81,8 @@ catch_discover_tests(motionplayer-dll)
 
 # Startup initializes process-wide storage paths. Keep its temporary project
 # separate from the plugin suite, which retains a shared TJS world.
-add_executable(startup-script-contract main.cpp startup-script.cpp
+add_executable(startup-script-contract main.cpp startup-script.cpp sibling-archives.cpp
+    windowex-lifecycle.cpp
     ${_ENGINE_API_TEXT_TRANSFORM_SOURCE})
 target_link_libraries(startup-script-contract PRIVATE Catch2::Catch2 krkr2core
     ${_KRKR2PLUGIN_LINK_ITEM})
