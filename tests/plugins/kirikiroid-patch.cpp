@@ -3,6 +3,7 @@
 #include "ncbind.hpp"
 #include "StorageIntf.h"
 #include "TextStream.h"
+#include "StartupPatchState.h"
 #include "tjs.h"
 
 #include <array>
@@ -256,4 +257,70 @@ TEST_CASE("Kirikiroid IO reads seeks and closes native files", "[kirikiroid-patc
         "})()"
     )).AsInteger() == 1);
     CHECK_THROWS(runtime.eval(TJS_W("IO.ftell(0)")));
+}
+
+TEST_CASE("Startup patch retry restores wrappers while preserving framework changes",
+           "[kirikiroid-patch]") {
+    PatchRuntime runtime;
+    runtime.execute(TJS_W(
+        "global.__checkpoint=%[count:7,nested:%[label:\"before\"],entries:[1,2]];"
+        "__checkpoint.self=__checkpoint;"
+    ));
+    const auto original = runtime.eval(TJS_W("&Storages.extractStorageExt"));
+    tTVPStartupPatchState state(TVPGetScriptEngine());
+    runtime.execute(TJS_W(
+        "__checkpoint.count=99; __checkpoint.nested.label=\"after\";"
+        "__checkpoint.entries.add(3); delete __checkpoint.self;"
+        "global.__checkpointAdded=42;"
+        "Storages.__checkpointOriginal=&Storages.extractStorageExt;"
+        "Storages.extractStorageExt=function(path) { return Storages.__checkpointOriginal(path); };"
+    ));
+    state.SealAttempt();
+    runtime.execute(TJS_W("__checkpoint.entries.add(4); __checkpoint.count=123;"));
+    state.PrepareRetry();
+    CHECK(runtime.eval(TJS_W("__checkpoint.count")).AsInteger() == 123);
+    CHECK(ttstr(runtime.eval(TJS_W("__checkpoint.nested.label"))) == TJS_W("before"));
+    CHECK(runtime.eval(TJS_W("__checkpoint.entries.count")).AsInteger() == 3);
+    CHECK(runtime.eval(TJS_W("__checkpoint.entries[2]")).AsInteger() == 4);
+    CHECK(runtime.eval(TJS_W("__checkpoint.self===__checkpoint")).AsInteger() == 1);
+    CHECK(runtime.eval(TJS_W("__checkpointAdded")).AsInteger() == 42);
+    CHECK(runtime.eval(TJS_W("Object.hasMember(Storages,\"__checkpointOriginal\")")).AsInteger() == 0);
+    const auto restored = runtime.eval(TJS_W("&Storages.extractStorageExt"));
+    CHECK(restored.AsObjectNoAddRef() == original.AsObjectNoAddRef());
+    CHECK(ttstr(runtime.eval(TJS_W("Storages.extractStorageExt(\"voice.ogg\")")))
+        == TJS_W(".ogg"));
+}
+
+TEST_CASE("Successful startup patches keep their changes",
+           "[kirikiroid-patch]") {
+    PatchRuntime runtime;
+    runtime.execute(TJS_W("global.__checkpointSuccess=0;"));
+    {
+        tTVPStartupPatchState state(TVPGetScriptEngine());
+        runtime.execute(TJS_W("__checkpointSuccess=42;"));
+    }
+    CHECK(runtime.eval(TJS_W("__checkpointSuccess")).AsInteger() == 42);
+}
+
+TEST_CASE("Startup retry retains plugin registrations and early definitions",
+           "[kirikiroid-patch]") {
+    PatchRuntime runtime;
+    runtime.execute(TJS_W("global.__checkpointHost=%[original:7];"));
+    tTVPStartupPatchState state(TVPGetScriptEngine(), true);
+    runtime.execute(TJS_W("__checkpointHost.original=99; global.__checkpointScript=1;"));
+    {
+        tTVPStartupPatchPluginScope plugin;
+        runtime.execute(TJS_W(
+            "global.__checkpointPlugin=%[value:42];"
+            "__checkpointHost.plugin=12;"
+        ));
+        plugin.Commit();
+    }
+    runtime.execute(TJS_W("__checkpointPlugin.value=100;"));
+    state.SealAttempt();
+    state.PrepareRetry();
+    CHECK(runtime.eval(TJS_W("__checkpointHost.original")).AsInteger() == 7);
+    CHECK(runtime.eval(TJS_W("__checkpointHost.plugin")).AsInteger() == 12);
+    CHECK(runtime.eval(TJS_W("__checkpointPlugin.value")).AsInteger() == 42);
+    CHECK(runtime.eval(TJS_W("__checkpointScript")).AsInteger() == 1);
 }

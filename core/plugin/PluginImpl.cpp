@@ -17,6 +17,7 @@
 #include "tjsCommHead.h"
 
 #include "ScriptMgnIntf.h"
+#include "StartupPatchState.h"
 #include "PluginImpl.h"
 
 #include "StorageImpl.h"
@@ -637,6 +638,7 @@ static void TVPRegisterFontInfoStub() {
 }
 
 void TVPLoadPlugin(const ttstr &name) {
+    tTVPStartupPatchPluginScope patchBindings;
     ttstr normalizedShortName = TVPGetNormalizedPluginName(name);
     ttstr resolvedName = name;
     if(normalizedShortName == TJS_W("motionplayer_nod3d.dll"))
@@ -689,6 +691,7 @@ void TVPLoadPlugin(const ttstr &name) {
         }
         PluginCallTracer::Instance().LogPluginLoad(name.AsStdString(), false, stub);
     }
+    patchBindings.Commit();
 }
 
 //---------------------------------------------------------------------------

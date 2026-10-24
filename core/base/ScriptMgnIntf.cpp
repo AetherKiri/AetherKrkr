@@ -13,8 +13,10 @@
 
 #include "tjs.h"
 #include "tjsDebug.h"
+#include "tjsMemberWriteScope.h"
 #include "tjsArray.h"
 #include "ScriptMgnIntf.h"
+#include "StartupPatchState.h"
 #include "StorageIntf.h"
 #include "DebugIntf.h"
 #include "WindowIntf.h"
@@ -436,6 +438,12 @@ static bool TVPExecutingStartupScript = false;
 static ttstr TVPDeferredRootPatch;
 static ttstr TVPDeferredRootPatchDependency;
 static bool TVPDeferredRootPatchPending = false;
+static std::unique_ptr<tTVPStartupPatchState> TVPDeferredRootPatchState;
+
+namespace {
+static void TVPInheritDeferredPatchMembers(const tjs_char *name,
+    const tTJSVariant &previous, const tTJSVariant &replacement);
+}
 
 static bool TVPHasStartupPatchDependency(const ttstr &name) {
     tTJSVariant value;
@@ -670,6 +678,7 @@ void TVPInitScriptEngine() {
 // TVPUninitScriptEngine
 //---------------------------------------------------------------------------
 void TVPUninitScriptEngine() {
+    TVPDeferredRootPatchState.reset();
     if(TVPScriptEngineUninit && !TVPScriptEngine)
         return;
     TVPScriptEngineUninit = true;
@@ -3173,6 +3182,19 @@ void TVPExecuteStorage(const ttstr &name, iTJSDispatch2 *context,
 
     TVPStorageExecutionSerial.fetch_add(1, std::memory_order_relaxed);
 
+    // A deferred patch may replace a class and use its pre-existing static
+    // instance before assigning a new one later in the same script.
+    std::unique_ptr<tTJSMemberWriteScope> inheritedMembers;
+    if(TVPDeferredRootPatchPending && resolvedPlace == TVPDeferredRootPatch &&
+       !context && !isexpression) {
+        if(TVPDeferredRootPatchState) {
+            TVPDeferredRootPatchState->PrepareRetry();
+            TVPDeferredRootPatchState.reset();
+        }
+        inheritedMembers = std::make_unique<tTJSMemberWriteScope>(
+            TVPScriptEngine->GetGlobalNoAddRef(), TVPInheritDeferredPatchMembers);
+    }
+
     // Check if export_scripts is enabled (used by both bytecode and text paths)
     tTJSVariant exportOpt;
     bool doExport = false;
@@ -3614,6 +3636,21 @@ static tTVPGlobalCallableKind TVPGetGlobalCallableKind(
         return tTVPGlobalCallableKind::Class;
     }
     return tTVPGlobalCallableKind::None;
+}
+
+static void TVPInheritDeferredPatchMembers(const tjs_char *name,
+    const tTJSVariant &previous, const tTJSVariant &replacement) {
+    try {
+        const auto kind = TVPGetGlobalCallableKind(previous);
+        if(kind == tTVPGlobalCallableKind::None ||
+           kind != TVPGetGlobalCallableKind(replacement) ||
+           previous.AsObjectNoAddRef() == replacement.AsObjectNoAddRef()) return;
+        TVPMergeMissingObjectMembers(replacement.AsObjectNoAddRef(),
+                                     previous.AsObjectNoAddRef());
+    } catch(const TJS::eTJS &error) {
+        spdlog::debug("Deferred patch member inheritance skipped for '{}': {}",
+                      ttstr(name).AsStdString(), error.GetMessage().AsStdString());
+    }
 }
 
 class tTVPCollectGlobalCallablesCallback final : public tTJSDispatch {
@@ -4116,6 +4153,7 @@ void TVPExecuteStartupScript() {
     // legacy encoding again after startup.
     TVPSetDefaultReadEncoding(TJS_W("utf-8"));
     TVPDeferredRootPatchPending = false;
+    TVPDeferredRootPatchState.reset();
     TVPDeferredRootPatch.Clear();
     TVPDeferredRootPatchDependency.Clear();
 
@@ -4124,6 +4162,7 @@ void TVPExecuteStartupScript() {
         TVPInstallStartupPatchPrerequisites();
         const ttstr patch = TVPGetAppPath() + TJS_W("patch.tjs");
         if(TVPIsExistentStorageNoSearch(patch)) {
+            auto originalBindings = std::make_unique<tTVPStartupPatchState>(TVPScriptEngine, true);
             try {
                 TVPExecuteStorage(patch);
             } catch(const TJS::eTJSScriptError &e) {
@@ -4132,6 +4171,8 @@ void TVPExecuteStartupScript() {
                     TVPGetMissingStartupPatchDependency(e.GetMessage());
                 if(dependency.IsEmpty() ||
                    !TVPIsExistentStorage(TJS_W("system/Initialize.tjs"))) throw;
+                originalBindings->SealAttempt();
+                TVPDeferredRootPatchState = std::move(originalBindings);
                 TVPDeferredRootPatch = TVPSearchPlacedPath(patch);
                 TVPDeferredRootPatchDependency = dependency;
                 TVPDeferredRootPatchPending = true;

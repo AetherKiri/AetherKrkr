@@ -11,6 +11,7 @@
 #include "tjsCommHead.h"
 
 #include "tjsObject.h"
+#include "tjsMemberWriteScope.h"
 #include "tjsArray.h"
 #include "tjsDictionary.h"
 #include "tjsUtils.h"
@@ -1950,6 +1951,8 @@ namespace TJS {
         if(!param)
             return TJS_E_INVALIDPARAM;
 
+        if(param->Type() == tvtObject)
+            tTJSMemberWriteScope::Notify(this, membername, GetValue(data), *param);
         CheckObjectClosureRemove(GetValue(data));
         try {
             GetValue(data).CopyRef(*param);
@@ -2044,6 +2047,9 @@ namespace TJS {
         if(!param)
             return TJS_E_INVALIDPARAM;
 
+        if(param->Type() == tvtObject)
+            tTJSMemberWriteScope::Notify(
+                this, static_cast<const tjs_char *>(*membername), GetValue(data), *param);
         CheckObjectClosureRemove(GetValue(data));
         try {
             GetValue(data).CopyRef(*param);
