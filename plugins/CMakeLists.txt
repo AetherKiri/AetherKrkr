@@ -48,6 +48,7 @@ target_sources(${PROJECT_NAME} PRIVATE
     menuExt.cpp
     getSample.cpp
     kirikiroid2.cpp
+    kirikiroid2Streams.cpp
     layerExPerspective.cpp
     fftgraph.cpp
     LayerExBase.cpp

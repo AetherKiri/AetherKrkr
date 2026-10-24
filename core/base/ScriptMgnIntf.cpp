@@ -13,8 +13,10 @@
 
 #include "tjs.h"
 #include "tjsDebug.h"
+#include "tjsMemberWriteScope.h"
 #include "tjsArray.h"
 #include "ScriptMgnIntf.h"
+#include "StartupPatchState.h"
 #include "StorageIntf.h"
 #include "DebugIntf.h"
 #include "WindowIntf.h"
@@ -433,6 +435,45 @@ tTJS *TVPScriptEngine = nullptr;
 ttstr TVPStartupScriptName(TJS_W("startup.tjs"));
 
 static bool TVPExecutingStartupScript = false;
+static ttstr TVPDeferredRootPatch;
+static ttstr TVPDeferredRootPatchDependency;
+static bool TVPDeferredRootPatchPending = false;
+static std::unique_ptr<tTVPStartupPatchState> TVPDeferredRootPatchState;
+
+namespace {
+static void TVPInheritDeferredPatchMembers(const tjs_char *name,
+    const tTJSVariant &previous, const tTJSVariant &replacement);
+}
+
+static bool TVPHasStartupPatchDependency(const ttstr &name) {
+    tTJSVariant value;
+    auto *global = TVPScriptEngine->GetGlobalNoAddRef();
+    return TJS_SUCCEEDED(global->PropGet(
+               TJS_MEMBERMUSTEXIST | TJS_IGNOREPROP, name.c_str(), nullptr,
+               &value, global)) && value.Type() != tvtVoid &&
+        (value.Type() != tvtObject || value.AsObjectNoAddRef());
+}
+
+static ttstr TVPGetMissingStartupPatchDependency(const ttstr &message) {
+    // Use the active TJS message template, including localized message maps.
+    // Only a missing global that the framework can supply qualifies for a
+    // late retry; arbitrary script exceptions and syntax errors do not.
+    using String = std::basic_string<tjs_char>;
+    const String format(ttstr(TJSMemberNotFound).c_str());
+    const auto slot = format.find(TJS_W("%1"));
+    if(slot == String::npos) return {};
+    const String prefix = format.substr(0, slot);
+    const String suffix = format.substr(slot + 2);
+    const String text(message.c_str(), message.GetLen());
+    if(text.size() <= prefix.size() + suffix.size() ||
+       text.compare(0, prefix.size(), prefix) != 0 ||
+       text.compare(text.size() - suffix.size(), suffix.size(), suffix) != 0)
+        return {};
+    const ttstr dependency(text.substr(
+        prefix.size(), text.size() - prefix.size() - suffix.size()));
+    if(TVPHasStartupPatchDependency(dependency)) return {};
+    return dependency;
+}
 
 class tTVPStartupScriptPhaseGuard final {
 public:
@@ -637,6 +678,7 @@ void TVPInitScriptEngine() {
 // TVPUninitScriptEngine
 //---------------------------------------------------------------------------
 void TVPUninitScriptEngine() {
+    TVPDeferredRootPatchState.reset();
     if(TVPScriptEngineUninit && !TVPScriptEngine)
         return;
     TVPScriptEngineUninit = true;
@@ -3123,16 +3165,35 @@ void TVPExecuteStorage(const ttstr &name, iTJSDispatch2 *context,
     if(!TVPScriptEngine)
         TVPThrowInternalError;
 
-    // Some KAG titles execute a root patch.tjs from startup.tjs before the
-    // framework's system/Initialize.tjs has loaded Action.tjs and its base
-    // classes. Defer only that standard root patch during startup; it is
-    // executed again after framework initialization below.
-    if(TVPExecutingStartupScript && name == TJS_W("patch.tjs")) {
-        spdlog::info("Deferring root patch.tjs until framework startup completes");
+    const ttstr resolvedPlace(TVPSearchPlacedPath(name));
+    // A root patch that already failed on a missing framework global may be
+    // requested again by startup.tjs. Defer that exact resolved storage only
+    // while its dependency is still absent. A game/archive patch with the
+    // same basename retains normal execStorage context and return semantics.
+    if(TVPExecutingStartupScript && TVPDeferredRootPatchPending &&
+       resolvedPlace == TVPDeferredRootPatch && !context && !isexpression &&
+       !TVPHasStartupPatchDependency(TVPDeferredRootPatchDependency)) {
+        spdlog::info("Deferring framework-dependent startup patch: {} ({})",
+                     resolvedPlace.AsStdString(),
+                     TVPDeferredRootPatchDependency.AsStdString());
+        if(result) result->Clear();
         return;
     }
 
     TVPStorageExecutionSerial.fetch_add(1, std::memory_order_relaxed);
+
+    // A deferred patch may replace a class and use its pre-existing static
+    // instance before assigning a new one later in the same script.
+    std::unique_ptr<tTJSMemberWriteScope> inheritedMembers;
+    if(TVPDeferredRootPatchPending && resolvedPlace == TVPDeferredRootPatch &&
+       !context && !isexpression) {
+        if(TVPDeferredRootPatchState) {
+            TVPDeferredRootPatchState->PrepareRetry();
+            TVPDeferredRootPatchState.reset();
+        }
+        inheritedMembers = std::make_unique<tTJSMemberWriteScope>(
+            TVPScriptEngine->GetGlobalNoAddRef(), TVPInheritDeferredPatchMembers);
+    }
 
     // Check if export_scripts is enabled (used by both bytecode and text paths)
     tTJSVariant exportOpt;
@@ -3143,7 +3204,7 @@ void TVPExecuteStorage(const ttstr &name, iTJSDispatch2 *context,
     }
 
     { // for bytecode
-        ttstr place(TVPSearchPlacedPath(name));
+        const ttstr &place = resolvedPlace;
         ttstr shortname(TVPExtractStorageName(place));
         std::unique_ptr<tTJSBinaryStream> stream{ TVPCreateBinaryStreamForRead(
             place, modestr) };
@@ -3221,12 +3282,14 @@ void TVPExecuteStorage(const ttstr &name, iTJSDispatch2 *context,
 
             if(isbytecode) {
                 TVPApplyPostScriptCompatibilityPatches(shortname);
+                if(place == TVPDeferredRootPatch)
+                    TVPDeferredRootPatchPending = false;
                 return;
             }
         }
     }
 
-    ttstr place(TVPSearchPlacedPath(name));
+    const ttstr &place = resolvedPlace;
     ttstr shortname(TVPExtractStorageName(place));
     std::unique_ptr<iTJSTextReadStream> stream{ TVPCreateTextStreamForRead(
         place, modestr) };
@@ -3263,6 +3326,8 @@ void TVPExecuteStorage(const ttstr &name, iTJSDispatch2 *context,
             TVPScriptEngine->EvalExpression(buffer, result, context,
                                             &shortname);
         TVPApplyPostScriptCompatibilityPatches(shortname);
+        if(place == TVPDeferredRootPatch)
+            TVPDeferredRootPatchPending = false;
     }
 }
 
@@ -3571,6 +3636,21 @@ static tTVPGlobalCallableKind TVPGetGlobalCallableKind(
         return tTVPGlobalCallableKind::Class;
     }
     return tTVPGlobalCallableKind::None;
+}
+
+static void TVPInheritDeferredPatchMembers(const tjs_char *name,
+    const tTJSVariant &previous, const tTJSVariant &replacement) {
+    try {
+        const auto kind = TVPGetGlobalCallableKind(previous);
+        if(kind == tTVPGlobalCallableKind::None ||
+           kind != TVPGetGlobalCallableKind(replacement) ||
+           previous.AsObjectNoAddRef() == replacement.AsObjectNoAddRef()) return;
+        TVPMergeMissingObjectMembers(replacement.AsObjectNoAddRef(),
+                                     previous.AsObjectNoAddRef());
+    } catch(const TJS::eTJS &error) {
+        spdlog::debug("Deferred patch member inheritance skipped for '{}': {}",
+                      ttstr(name).AsStdString(), error.GetMessage().AsStdString());
+    }
 }
 
 class tTVPCollectGlobalCallablesCallback final : public tTJSDispatch {
@@ -4072,11 +4152,37 @@ void TVPExecuteStartupScript() {
     // setting leak into the next title; its patch.tjs may select a different
     // legacy encoding again after startup.
     TVPSetDefaultReadEncoding(TJS_W("utf-8"));
+    TVPDeferredRootPatchPending = false;
+    TVPDeferredRootPatchState.reset();
+    TVPDeferredRootPatch.Clear();
+    TVPDeferredRootPatchDependency.Clear();
 
     ttstr strPatchError;
     try {
         TVPInstallStartupPatchPrerequisites();
+        const ttstr patch = TVPGetAppPath() + TJS_W("patch.tjs");
+        if(TVPIsExistentStorageNoSearch(patch)) {
+            auto originalBindings = std::make_unique<tTVPStartupPatchState>(TVPScriptEngine, true);
+            try {
+                TVPExecuteStorage(patch);
+            } catch(const TJS::eTJSScriptError &e) {
+                if(dynamic_cast<const TJS::eTJSScriptException *>(&e)) throw;
+                const auto dependency =
+                    TVPGetMissingStartupPatchDependency(e.GetMessage());
+                if(dependency.IsEmpty() ||
+                   !TVPIsExistentStorage(TJS_W("system/Initialize.tjs"))) throw;
+                originalBindings->SealAttempt();
+                TVPDeferredRootPatchState = std::move(originalBindings);
+                TVPDeferredRootPatch = TVPSearchPlacedPath(patch);
+                TVPDeferredRootPatchDependency = dependency;
+                TVPDeferredRootPatchPending = true;
+                spdlog::warn(
+                    "Startup patch needs framework global '{}'; retrying after startup: {}",
+                    dependency.AsStdString(), patch.AsStdString());
+            }
+        }
     } catch(const TJS::eTJSScriptError &e) {
+        TVPLogStartupScriptError("Startup patch error", e);
         ttstr &msg = strPatchError;
         msg += e.GetMessage();
         const tjs_char *pszBlockName = e.GetBlockName();
@@ -4090,13 +4196,17 @@ void TVPExecuteStartupScript() {
         msg += TJS_W("\n");
         msg += e.GetTrace();
     } catch(const TJS::eTJS &e) {
+        spdlog::error("Startup patch TJS error: {}", e.GetMessage().AsStdString());
         if(!TVPSystemUninitCalled)
             strPatchError = e.GetMessage();
     } catch(const std::exception &e) {
+        spdlog::error("Startup patch error: {}", e.what());
         strPatchError = e.what();
     } catch(const char *e) {
+        spdlog::error("Startup patch error: {}", e);
         strPatchError = e;
     } catch(const tjs_char *e) {
+        spdlog::error("Startup patch error: {}", ttstr(e).AsStdString());
         strPatchError = e;
     }
 
@@ -4157,8 +4267,8 @@ void TVPExecuteStartupScript() {
         __android_log_print(ANDROID_LOG_INFO, "krkr2",
                             "Startup script ended successfully");
 #endif
-        ttstr patch = TVPGetAppPath() + "patch.tjs";
-        if(TVPIsExistentStorageNoSearch(patch)) {
+        if(TVPDeferredRootPatchPending) {
+            const ttstr patch = TVPDeferredRootPatch;
             TVPInstallPatchWindowPrerequisites();
             // Root-level compatibility patches run after the framework
             // startup scripts. If one replaces a global function or class,
@@ -4177,8 +4287,17 @@ void TVPExecuteStartupScript() {
                 TVPReadPatchRuntimeRegistry(savedRuntimeRegistry);
             try {
                 TVPExecuteStorage(patch);
+            } catch(const TJS::eTJSScriptError &e) {
+                TVPLogStartupScriptError("Deferred startup patch error", e);
+            } catch(const TJS::eTJS &e) {
+                spdlog::error("Deferred startup patch TJS error: {}",
+                              e.GetMessage().AsStdString());
+            } catch(const std::exception &e) {
+                spdlog::error("Deferred startup patch error: {}", e.what());
             } catch(...) {
+                spdlog::error("Deferred startup patch failed: {}", patch.AsStdString());
             }
+            TVPDeferredRootPatchPending = false;
             const size_t restoredCallableCount =
                 TVPRestoreMissingGlobalCallableMembers(
                     savedGlobalCallables);
