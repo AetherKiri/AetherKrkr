@@ -759,6 +759,9 @@ void TVPLoadInternalPlugins() {
     // the same point as the other internal plug-ins so those global classes
     // exist during startup in both core and full load modes.
     ncbAutoRegister::LoadModule(TJS_W("krkrgles.dll"));
+    // Root patches run before startup.tjs can explicitly link modules. Their
+    // encoding, dispatch and stream ABI is part of the core startup contract.
+    ncbAutoRegister::LoadModule(TJS_W("kirikiroid2.dll"));
     if(TVPIsAetherAllPluginLoadMode()) {
         ncbAutoRegister::LoadAllModules();
     } else {

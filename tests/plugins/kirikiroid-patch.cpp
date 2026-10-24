@@ -139,9 +139,11 @@ TEST_CASE("Kirikiroid Object preserves dispatch statuses and contexts",
         "})()"
     )).AsInteger() == 1);
     CHECK(runtime.eval(TJS_W(
-        "Object.propGet(null, 0, \"value\")[0] == -1006 &&"
-        "Object.isInstanceOf(null, 0, 0, \"Object\") == -1006"
+        "(function(){ var object=%[]; object[\"1.5\"]=9;"
+        " return Object.hasMember(object,1.5); })()"
     )).AsInteger() == 1);
+    CHECK_THROWS(runtime.eval(TJS_W("Object.propGet(null,0,\"value\")")));
+    CHECK_THROWS(runtime.eval(TJS_W("Object.isInstanceOf(null,0,0,\"Object\")")));
 }
 
 TEST_CASE("Kirikiroid properties keep authored getter and setter closures",

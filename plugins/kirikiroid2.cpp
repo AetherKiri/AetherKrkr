@@ -175,14 +175,16 @@ tjs_error objectHasMember(tTJSVariant *result, tjs_int count,
                            tTJSVariant **args, iTJSDispatch2 *) {
     if(count < 2) return TJS_E_BADPARAMCOUNT;
     const auto object = args[0]->AsObjectClosureNoAddRef();
-    const Member member(*args[1]);
+    const bool numeric = args[1]->Type() == tvtInteger;
+    const ttstr name = numeric ? ttstr() : ttstr(*args[1]);
     const tjs_uint32 flags = count > 2
         ? static_cast<tjs_uint32>(args[2]->AsInteger())
         : TJS_MEMBERMUSTEXIST;
     tTJSVariant value;
-    const auto status = member.numeric
-        ? object.PropGetByNum(flags, member.index, &value, nullptr)
-        : object.PropGet(flags, member.text(), nullptr, &value, nullptr);
+    const auto status = numeric
+        ? object.PropGetByNum(flags, static_cast<tjs_int>(args[1]->AsInteger()),
+                               &value, nullptr)
+        : object.PropGet(flags, name.c_str(), nullptr, &value, nullptr);
     if(status != TJS_E_MEMBERNOTFOUND && TJS_FAILED(status))
         return status;
     if(result) *result = status != TJS_E_MEMBERNOTFOUND;
@@ -199,6 +201,7 @@ tjs_error objectDispatch(tTJSVariant *result, tjs_int count,
                                  operation == DispatchOperation::InstanceOf;
     if(count < (needsValue ? 4 : 3)) return TJS_E_BADPARAMCOUNT;
     const auto object = args[0]->AsObjectClosureNoAddRef();
+    if(!object.Object) return TJS_E_INVALIDOBJECT;
     const auto flags = static_cast<tjs_uint32>(args[1]->AsInteger());
     const Member member(*args[2]);
     tTJSVariant value;
