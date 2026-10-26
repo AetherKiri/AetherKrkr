@@ -259,3 +259,69 @@ TEST_CASE("patch prerequisites persist globally across script blocks") {
     CHECK(evaluateInteger(engine.operator->(),
                           TJS_W("global.KAGWindow.COMMAND_WAIT")) == 2);
 }
+
+TEST_CASE("root patch configuration selects framework branches before startup",
+          "[script][startup-patch]") {
+    ScriptEngineOwner engine;
+    ttstr patch(TJS_W(
+        "// compatibility settings\r\n"
+        "/* outer /* @set(ignored = 1) */ comment */\r\n"
+        "@set (portable = 1)\r\n"
+        "@set (layout = (2 + 3) * 4)\r\n"
+        "var frameworkReady = true;\r\n"));
+    const ttstr prefix = TVPGetStartupPatchPreprocessorPrefix(patch);
+    REQUIRE_FALSE(prefix.IsEmpty());
+    REQUIRE_NOTHROW(engine->ExecScript(prefix.c_str()));
+    CHECK(engine->GetPPValue(TJS_W("portable")) == 1);
+    CHECK(engine->GetPPValue(TJS_W("layout")) == 20);
+    CHECK(engine->GetPPValue(TJS_W("ignored")) == 0);
+    CHECK(evaluateString(engine.operator->(),
+                         TJS_W("typeof global.frameworkReady")) ==
+          TJS_W("undefined"));
+    engine->ExecScript(TJS_W(
+        "@if (portable)\nvar selectedBitmap = 42;\n@endif\n"
+        "@if (!portable)\nthrow 'wrong framework branch';\n@endif\n"));
+    CHECK(evaluateInteger(engine.operator->(), TJS_W("selectedBitmap")) == 42);
+    REQUIRE(TVPMaskStartupPatchPreprocessorPrefix(patch, prefix));
+    engine->ExecScript(patch.c_str());
+    CHECK(evaluateInteger(engine.operator->(), TJS_W("frameworkReady")) == 1);
+}
+
+TEST_CASE("early root patch configuration runs once and preserves source lines",
+          "[script][startup-patch]") {
+    ScriptEngineOwner engine;
+    ttstr patch(TJS_W(
+        "/* configuration */\r\n@set (count = count + 1)\r\n"
+        "var bodyCalls = 1;\n@set (late = 7)\n"));
+    const ttstr original(patch);
+    const ttstr prefix = TVPGetStartupPatchPreprocessorPrefix(patch);
+    engine->ExecScript(prefix.c_str());
+    CHECK(engine->GetPPValue(TJS_W("count")) == 1);
+    CHECK(engine->GetPPValue(TJS_W("late")) == 0);
+    REQUIRE(TVPMaskStartupPatchPreprocessorPrefix(patch, prefix));
+    CHECK(patch.GetLen() == original.GetLen());
+    for(tjs_int index = 0; index < original.GetLen(); ++index) {
+        if(original[index] == TJS_W('\r') || original[index] == TJS_W('\n'))
+            CHECK(patch[index] == original[index]);
+    }
+    engine->ExecScript(patch.c_str());
+    CHECK(engine->GetPPValue(TJS_W("count")) == 1);
+    CHECK(engine->GetPPValue(TJS_W("late")) == 7);
+    CHECK(evaluateInteger(engine.operator->(), TJS_W("bodyCalls")) == 1);
+    ttstr changed(TJS_W("@set(other = 1)\nvar bodyCalls = 2;"));
+    CHECK_FALSE(TVPMaskStartupPatchPreprocessorPrefix(changed, prefix));
+}
+
+TEST_CASE("root patch configuration does not scan into executable code",
+          "[script][startup-patch]") {
+    for(const auto *script : {
+            TJS_W("// @set(hidden = 1)\nvar x = 1;"),
+            TJS_W("var x = '@set(hidden = 1)';"),
+            TJS_W("@if (later)\n@set(hidden = 1)\n@endif"),
+            TJS_W("function configure() { @set(hidden = 1) }"),
+            TJS_W("@setting = 1;"),
+            TJS_W("@set(unclosed = (1 + 2)"),
+            TJS_W("/* unclosed @set(hidden = 1)") }) {
+        CHECK(TVPGetStartupPatchPreprocessorPrefix(script).IsEmpty());
+    }
+}
