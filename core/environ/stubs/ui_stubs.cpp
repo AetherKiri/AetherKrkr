@@ -39,6 +39,7 @@
 #include "Platform.h"
 #include "TVPWindow.h"
 #include "Application.h"
+#include "HostWindow.h"
 #include "RenderManager.h"
 #include "GodotRenderManager.h"
 #include "StorageImpl.h"
@@ -74,7 +75,6 @@ uint32_t g_host_surface_width = 1920;
 uint32_t g_host_surface_height = 1080;
 bool g_host_prefer_gpu_frame = true;
 std::atomic_bool g_host_publish_raw_source_frame{false};
-tTJSNI_Window *g_host_window_owner = nullptr;
 std::vector<tTJSNI_Window *> g_host_window_owners;
 
 struct HostTextInputState {
@@ -280,8 +280,11 @@ void ClearHostTextInputState(tTJSNI_Window *owner) {
 void RegisterHostWindow(tTJSNI_Window *owner) {
     if(owner == nullptr)
         return;
+    g_host_window_owners.erase(
+        std::remove(g_host_window_owners.begin(), g_host_window_owners.end(),
+                    owner),
+        g_host_window_owners.end());
     g_host_window_owners.push_back(owner);
-    g_host_window_owner = owner;
 }
 
 void UnregisterHostWindow(tTJSNI_Window *owner) {
@@ -291,9 +294,6 @@ void UnregisterHostWindow(tTJSNI_Window *owner) {
         std::remove(g_host_window_owners.begin(), g_host_window_owners.end(),
                     owner),
         g_host_window_owners.end());
-    g_host_window_owner = g_host_window_owners.empty()
-                              ? nullptr
-                              : g_host_window_owners.back();
 }
 
 std::mutex g_host_video_overlay_mutex;
@@ -568,11 +568,12 @@ void LogHostFinalFrameStats(const char *source, const uint8_t *rgba,
                  source, static_cast<unsigned long long>(serial), width, height,
                  FormatHostFrameStats(full),
                  FormatHostFrameStats(title_region));
-    if (HostMotionDebugEnabled() && g_host_window_owner != nullptr &&
+    auto *window = TVPGetHostWindow();
+    if (HostMotionDebugEnabled() && window != nullptr &&
         (serial == 3000 || serial == 4200 || serial == 5160)) {
         spdlog::info("host final frame layer tree dump: serial={}",
                      static_cast<unsigned long long>(serial));
-        g_host_window_owner->DumpPrimaryLayerStructure();
+        window->DumpPrimaryLayerStructure();
     }
 }
 
@@ -671,6 +672,15 @@ void ApplyDrawDeviceSurfaceRect(iTVPDrawDevice *dd, const tTVPRect &rect,
 
 }
 
+tTJSNI_Window *TVPGetHostWindow() {
+    for(auto it = g_host_window_owners.rbegin();
+        it != g_host_window_owners.rend(); ++it) {
+        if((*it)->CanDeliverEvents())
+            return *it;
+    }
+    return nullptr;
+}
+
 extern "C" void TVPHostGetTextInputState(uint32_t *ime_active,
                                           int32_t *ime_mode,
                                           uint32_t *attention_point_valid,
@@ -720,9 +730,9 @@ extern "C" uint32_t TVPHostCopyTextInputText(char *out_buffer,
 }
 
 void TVPHostForceDrawDeviceShow() {
-    if (g_host_window_owner != nullptr) {
-        g_host_window_owner->UpdateContent();
-        g_host_window_owner->DeliverDrawDeviceShow();
+    if (auto *window = TVPGetHostWindow()) {
+        window->UpdateContent();
+        window->DeliverDrawDeviceShow();
     }
 }
 
@@ -730,10 +740,10 @@ extern "C" void TVPHostActivateMainWindow() {
     if (Application != nullptr) {
         Application->OnActivate();
     }
-    if (g_host_window_owner != nullptr) {
-        g_host_window_owner->FireOnActivate(true);
-        g_host_window_owner->UpdateContent();
-        g_host_window_owner->DeliverDrawDeviceShow();
+    if (auto *window = TVPGetHostWindow()) {
+        window->FireOnActivate(true);
+        window->UpdateContent();
+        window->DeliverDrawDeviceShow();
         spdlog::info("TVPHostActivateMainWindow: dispatched activate event");
     }
 }
@@ -811,7 +821,6 @@ extern "C" void TVPHostResetForGameSession() {
         g_host_video_overlay_right = 0;
         g_host_video_overlay_bottom = 0;
     }
-    g_host_window_owner = nullptr;
     g_host_window_owners.clear();
     g_postDrawHook = nullptr;
     spdlog::info("Host render state reset for next game session");
@@ -923,7 +932,7 @@ class HostWindowLayer : public iWindowLayer {
 public:
     explicit HostWindowLayer(tTJSNI_Window *owner)
         : owner_(owner), visible_(true), caption_("krkr2"),
-          width_(0), height_(0), active_(true), closing_(false) {
+          width_(0), height_(0), closing_(false) {
 #if defined(KRKR_ENABLE_GPU_BRIDGE)
         auto& egl = krkr::GetEngineEGLContext();
         if (egl.IsValid()) {
@@ -1011,7 +1020,12 @@ public:
         // No zoom transformation — coordinates pass through 1:1
     }
 
-    void BringToFront() override {}
+    void BringToFront() override {
+        if(owner_ && !closing_) {
+            RegisterHostWindow(owner_);
+            owner_->RequestUpdate();
+        }
+    }
 
     void ShowWindowAsModal() override {
         // The engine runs on the host UI thread, so returning immediately
@@ -1037,7 +1051,13 @@ public:
 
     bool GetVisible() override { return visible_; }
 
-    void SetVisible(bool bVisible) override { visible_ = bVisible; }
+    void SetVisible(bool bVisible) override {
+        visible_ = bVisible;
+        if(bVisible)
+            BringToFront();
+        else if(auto *window = TVPGetHostWindow())
+            window->RequestUpdate();
+    }
 
     const char *GetCaption() override { return caption_.c_str(); }
 
@@ -1079,6 +1099,9 @@ public:
     }
 
     void UpdateDrawBuffer(iTVPTexture2D *tex) override {
+        // Background windows can still redraw while a setup window is open.
+        // Only publish the window that receives the host's input.
+        if(!owner_ || owner_ != TVPGetHostWindow()) return;
 #if !defined(KRKR_ENABLE_GPU_BRIDGE)
         if (!tex || !owner_) return;
         const tjs_uint tw = tex->GetWidth();
@@ -1428,7 +1451,9 @@ public:
         delete this;
     }
 
-    bool GetWindowActive() override { return active_; }
+    bool GetWindowActive() override {
+        return owner_ && owner_ == TVPGetHostWindow();
+    }
 
     void Close() override {
         // Closing action by the "close" method, mirroring
@@ -1505,7 +1530,7 @@ public:
         // Rendering is driven by engine_tick / engine_read_frame_rgba
     }
 
-    void SetVisibleFromScript(bool b) override { visible_ = b; }
+    void SetVisibleFromScript(bool b) override { SetVisible(b); }
 
     void SetUseMouseKey(bool b) override {}
 
@@ -1717,7 +1742,6 @@ private:
     tjs_int height_;
     tjs_int paint_width_ = 0;
     tjs_int paint_height_ = 0;
-    bool active_;
     bool closing_;
     bool close_query_active_ = false;
     bool can_close_work_ = true;

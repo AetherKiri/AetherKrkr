@@ -8,6 +8,7 @@
  */
 
 #include "EngineLoop.h"
+#include "HostWindow.h"
 
 #include <chrono>
 #include <cstdlib>
@@ -234,6 +235,8 @@ uint32_t EngineLoop::ConvertModifiers(int32_t modifiers) {
 }
 
 bool EngineLoop::HandleInputEvent(const EngineInputEvent& event) {
+    if (!TVPGetHostWindow())
+        return false;
     switch (event.type) {
         case kEngineInputPointerDown:
             HandlePointerDown(event);
@@ -272,7 +275,7 @@ bool EngineLoop::IsTouchPointerEvent(const EngineInputEvent& event) {
 }
 
 void EngineLoop::HandlePointerDown(const EngineInputEvent& event) {
-    auto* win = TVPMainWindow;
+    auto* win = TVPGetHostWindow();
     if (!win) return;
 
     const tjs_int x = static_cast<tjs_int>(event.x);
@@ -343,7 +346,7 @@ void EngineLoop::HandlePointerDown(const EngineInputEvent& event) {
 }
 
 void EngineLoop::HandlePointerMove(const EngineInputEvent& event) {
-    auto* win = TVPMainWindow;
+    auto* win = TVPGetHostWindow();
     if (!win) return;
 
     const tjs_int x = static_cast<tjs_int>(event.x);
@@ -364,7 +367,7 @@ void EngineLoop::HandlePointerMove(const EngineInputEvent& event) {
 }
 
 void EngineLoop::HandlePointerUp(const EngineInputEvent& event) {
-    auto* win = TVPMainWindow;
+    auto* win = TVPGetHostWindow();
     if (!win) return;
 
     const tjs_int x = static_cast<tjs_int>(event.x);
@@ -435,7 +438,7 @@ void EngineLoop::HandlePointerUp(const EngineInputEvent& event) {
 }
 
 void EngineLoop::HandlePointerScroll(const EngineInputEvent& event) {
-    auto* win = TVPMainWindow;
+    auto* win = TVPGetHostWindow();
     if (!win) return;
 
     const tjs_int x = static_cast<tjs_int>(event.x);
@@ -458,7 +461,7 @@ void EngineLoop::HandlePointerScroll(const EngineInputEvent& event) {
 }
 
 void EngineLoop::HandleKeyDown(const EngineInputEvent& event) {
-    auto* win = TVPMainWindow;
+    auto* win = TVPGetHostWindow();
     if (!win) return;
 
     tjs_uint key = static_cast<tjs_uint>(event.key_code);
@@ -480,7 +483,7 @@ void EngineLoop::HandleKeyDown(const EngineInputEvent& event) {
 }
 
 void EngineLoop::HandleKeyUp(const EngineInputEvent& event) {
-    auto* win = TVPMainWindow;
+    auto* win = TVPGetHostWindow();
     if (!win) return;
 
     const tjs_uint key = static_cast<tjs_uint>(event.key_code);
@@ -496,7 +499,7 @@ void EngineLoop::HandleKeyUp(const EngineInputEvent& event) {
 }
 
 void EngineLoop::HandleTextInput(const EngineInputEvent& event) {
-    auto* win = TVPMainWindow;
+    auto* win = TVPGetHostWindow();
     if (!win) return;
 
     const uint32_t codepoint = event.unicode_codepoint;
