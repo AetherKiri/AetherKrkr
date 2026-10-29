@@ -87,7 +87,7 @@ using tTVPPostStartupScriptHook = void (*)();
 extern void TVPRegisterPostStartupScriptHook(tTVPPostStartupScriptHook hook);
 extern const tjs_char *TVPGetStartupPatchPrerequisitesScript();
 // Only leading, unconditional @set directives configure framework compilation.
-// The executable patch body remains deferred until startup has completed.
+// Their original source span stays masked while the initial patch is retried.
 extern ttstr TVPGetStartupPatchPreprocessorPrefix(const ttstr &script);
 extern bool TVPMaskStartupPatchPreprocessorPrefix(ttstr &script,
                                                  const ttstr &prefix);

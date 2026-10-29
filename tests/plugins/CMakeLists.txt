@@ -37,6 +37,7 @@ add_executable(motionplayer-dll
     godot-runtime-timing.cpp
     krkrgles-aliases.cpp
     kag-load-contract.cpp
+    kirikiroid-patch.cpp
     decode-arena.cpp
     render-simd.cpp
     script-compatibility.cpp

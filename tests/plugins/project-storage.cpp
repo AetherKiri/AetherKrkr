@@ -5,12 +5,16 @@
 #include "ArchiveAutoPathOrder.h"
 #include "SysInitImpl.h"
 #include "StorageImpl.h"
+#include "StorageIntf.h"
 
+#include <array>
+#include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <set>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -108,4 +112,45 @@ TEST_CASE("application home directory follows the active project") {
     const auto secondHomes = TVPGetApplicationHomeDirectory();
     REQUIRE(secondHomes.size() == 1);
     CHECK(secondHomes.front() == second.string());
+}
+
+TEST_CASE("placed path cache supports concurrent readers and invalidation",
+           "[storage-cache]") {
+    struct RestoreCacheLimit {
+        tjs_uint limit = TVPGetAutoPathCacheLimit();
+        ~RestoreCacheLimit() {
+            TVPSetAutoPathCacheMaxCount(limit);
+            TVPClearStorageCaches();
+        }
+    } restore;
+    std::array<TemporaryProjectPath, 16> files;
+    std::vector<std::string> names;
+    for(const auto &file : files) {
+        std::ofstream output(file.path, std::ios::binary);
+        REQUIRE(output.good());
+        output << "cache fixture";
+        names.push_back(file.path.string());
+    }
+    TVPSetAutoPathCacheMaxCount(4);
+    std::atomic<bool> succeeded{true};
+    std::array<std::thread, 6> workers;
+    for(size_t worker = 0; worker < workers.size(); ++worker) {
+        workers[worker] = std::thread([&, worker] {
+            try {
+                for(size_t iteration = 0; iteration < 2000; ++iteration) {
+                    const ttstr name(names[(iteration + worker) % names.size()]);
+                    const ttstr expected(TVPNormalizeStorageName(name));
+                    if(TVPGetPlacedPath(name) != expected) succeeded = false;
+                    if(iteration % 7 == 0) TVPRemoveFromStorageCache(name);
+                    if(worker == 0 && iteration % 23 == 0)
+                        TVPClearStorageCaches();
+                    if(worker == 1 && iteration % 11 == 0)
+                        TVPSetAutoPathCacheMaxCount(4 + iteration % 5);
+                }
+            } catch(...) { succeeded = false; }
+        });
+    }
+    for(auto &worker : workers) worker.join();
+    CHECK(succeeded.load());
+    CHECK(TVPGetAutoPathCacheCount() <= TVPGetAutoPathCacheLimit());
 }

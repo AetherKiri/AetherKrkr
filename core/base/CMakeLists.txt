@@ -19,6 +19,7 @@ set(BASE_SOURCE_FILES
     ${BASE_PATH}/CharacterSet.cpp
     ${BASE_PATH}/EventIntf.cpp
     ${BASE_PATH}/ScriptMgnIntf.cpp
+    ${BASE_PATH}/StartupPatchState.cpp
     ${BASE_PATH}/StorageIntf.cpp
     ${BASE_PATH}/SysInitIntf.cpp
     ${BASE_PATH}/SystemIntf.cpp

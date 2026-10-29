@@ -1448,15 +1448,20 @@ bool AutoPathTableInit = false;
 
 //---------------------------------------------------------------------------
 static void TVPInvalidateAutoPathTable() {
+    tTJSCriticalSectionHolder cs_holder(TVPCreateStreamCS);
     TVPAutoPathTable.Clear();
     AutoPathTableInit = false;
 }
 
 //---------------------------------------------------------------------------
-static void TVPClearAutoPathSearchCache() { TVPAutoPathCache.Clear(); }
+static void TVPClearAutoPathSearchCache() {
+    tTJSCriticalSectionHolder cs_holder(TVPCreateStreamCS);
+    TVPAutoPathCache.Clear();
+}
 
 //---------------------------------------------------------------------------
 static void TVPClearAutoPathCache() {
+    tTJSCriticalSectionHolder cs_holder(TVPCreateStreamCS);
     TVPAutoPathCache.Clear();
     TVPInvalidateAutoPathTable();
 }
@@ -1472,6 +1477,11 @@ struct tTVPClearAutoPathCacheCallback : public tTVPCompactEventCallbackIntf {
 } static TVPClearAutoPathCacheCallback;
 
 static bool TVPClearAutoPathCacheCallbackInit = false;
+
+static void TVPCachePlacedPath(const ttstr &name, const ttstr &placed) {
+    tTJSCriticalSectionHolder cs_holder(TVPCreateStreamCS);
+    TVPAutoPathCache.Add(name, placed);
+}
 
 static bool TVPGetProjectRelativeAutoPath(const ttstr &path,
                                           ttstr &relative) {
@@ -1676,6 +1686,7 @@ void TVPRemoveAutoPath(const ttstr &name) {
 
 //---------------------------------------------------------------------------
 static tjs_uint TVPRebuildAutoPathTable() {
+    tTJSCriticalSectionHolder cs_holder(TVPCreateStreamCS);
     // rebuild auto path table
     if(AutoPathTableInit)
         return 0;
@@ -1691,8 +1702,6 @@ static tjs_uint TVPRebuildAutoPathTable() {
         bool &active;
         ~tRebuildGuard() { active = false; }
     } guard{ rebuilding };
-
-    tTJSCriticalSectionHolder cs_holder(TVPCreateStreamCS);
 
     TVPAutoPathTable.Clear();
 
@@ -1843,6 +1852,7 @@ ttstr TVPGetPlacedPath(const ttstr &name) {
     // first failed physical lookup can poison the cache with a miss.
     ttstr motionSourceName;
     if(TVPGetMotionParameterCompanionInfo(name, &motionSourceName)) {
+        tTJSCriticalSectionHolder cs_holder(TVPCreateStreamCS);
         bool motionSourceExists = false;
         ttstr sourceInSamePath = TVPExtractStoragePath(normalized) +
             motionSourceName;
@@ -1866,21 +1876,26 @@ ttstr TVPGetPlacedPath(const ttstr &name) {
         }
     }
 
-    // Consult a successful placement before invoking a resolver.  Apart from
-    // avoiding duplicate archive probes, this is required for stream opens:
-    // _TVPCreateStream holds TVPCreateStreamCS while asking for the placed
-    // path, and a resolver's exact-storage probe takes that same lock.
-    // Re-entering the resolver for an already-cached virtual URI would
-    // deadlock the engine at the first CSV read.
-    ttstr *incache = TVPAutoPathCache.FindAndTouch(name);
-    if(incache) {
+    // FindAndTouch mutates the LRU links even for a cache hit. Copy the value
+    // under the stream lock so async image reads cannot race lookup, eviction
+    // or invalidation. Release the lock before invoking storage resolvers.
+    ttstr cached;
+    bool cacheHit = false;
+    {
+        tTJSCriticalSectionHolder cs_holder(TVPCreateStreamCS);
+        if(const auto *entry = TVPAutoPathCache.FindAndTouch(name)) {
+            cached = *entry;
+            cacheHit = true;
+        }
+    }
+    if(cacheHit) {
         if(TVPStorageTraceEnabled() && TVPStorageTraceName(name)) {
             spdlog::info("StorageTrace cache request={} result={}",
-                         name.AsStdString(), incache->AsStdString());
+                         name.AsStdString(), cached.AsStdString());
         }
-        if(*incache == TVP_AUTOPATH_CACHE_MISS_MARKER)
+        if(cached == TVP_AUTOPATH_CACHE_MISS_MARKER)
             return {};
-        return *incache; // found in cache
+        return cached;
     }
 
     // Give private compatibility plug-ins one chance to translate a logical
@@ -1896,7 +1911,7 @@ ttstr TVPGetPlacedPath(const ttstr &name) {
         // probe while the caller is opening the stream.
         const std::string resolvedName = resolved.AsStdString();
         if(resolvedName.rfind("aetherui://", 0) == 0) {
-            TVPAutoPathCache.Add(name, resolved);
+            TVPCachePlacedPath(name, resolved);
             if(TVPStorageTraceEnabled() && TVPStorageTraceName(name)) {
                 spdlog::info(
                     "StorageTrace resolver virtual request={} resolved={}",
@@ -1906,7 +1921,7 @@ ttstr TVPGetPlacedPath(const ttstr &name) {
         }
         ttstr placed = TVPGetPlacedPath(resolved);
         if(!placed.IsEmpty()) {
-            TVPAutoPathCache.Add(name, placed);
+            TVPCachePlacedPath(name, placed);
             if(TVPStorageTraceEnabled() && TVPStorageTraceName(name)) {
                 spdlog::info(
                     "StorageTrace resolver request={} resolved={} placed={}",
@@ -2334,6 +2349,7 @@ tjs_uint TVPGetAutoPathTableCount() {
 }
 
 void TVPRemoveFromStorageCache(const ttstr &name) {
+    tTJSCriticalSectionHolder cs_holder(TVPCreateStreamCS);
     TVPAutoPathCache.Delete(name);
 }
 
