@@ -435,6 +435,8 @@ tTJS *TVPScriptEngine = nullptr;
 ttstr TVPStartupScriptName(TJS_W("startup.tjs"));
 
 static bool TVPExecutingStartupScript = false;
+static ttstr TVPStartupPatchPreprocessorStorage;
+static ttstr TVPStartupPatchPreprocessorPrefix;
 static ttstr TVPDeferredRootPatch;
 static ttstr TVPDeferredRootPatchDependency;
 static bool TVPDeferredRootPatchPending = false;
@@ -474,7 +476,6 @@ static ttstr TVPGetMissingStartupPatchDependency(const ttstr &message) {
     if(TVPHasStartupPatchDependency(dependency)) return {};
     return dependency;
 }
-
 class tTVPStartupScriptPhaseGuard final {
 public:
     explicit tTVPStartupScriptPhaseGuard(bool &active) : active_(active) {
@@ -3295,6 +3296,12 @@ void TVPExecuteStorage(const ttstr &name, iTJSDispatch2 *context,
         place, modestr) };
     ttstr buffer;
     stream->Read(buffer, 0);
+    if(place == TVPStartupPatchPreprocessorStorage) {
+        // Keep the consumed prefix until the body succeeds: a missing
+        // framework dependency may require another attempt at this patch.
+        TVPMaskStartupPatchPreprocessorPrefix(
+            buffer, TVPStartupPatchPreprocessorPrefix);
+    }
     TVPApplyScriptCompatibilityPatches(shortname, buffer);
 
     // Export plain-text script when export_scripts is enabled
@@ -3325,6 +3332,10 @@ void TVPExecuteStorage(const ttstr &name, iTJSDispatch2 *context,
         else
             TVPScriptEngine->EvalExpression(buffer, result, context,
                                             &shortname);
+        if(place == TVPStartupPatchPreprocessorStorage) {
+            TVPStartupPatchPreprocessorStorage.Clear();
+            TVPStartupPatchPreprocessorPrefix.Clear();
+        }
         TVPApplyPostScriptCompatibilityPatches(shortname);
         if(place == TVPDeferredRootPatch)
             TVPDeferredRootPatchPending = false;
@@ -3422,6 +3433,89 @@ static void TVPLogStartupScriptError(const char *stage,
 //---------------------------------------------------------------------------
 // TVPExecuteStartupScript
 //---------------------------------------------------------------------------
+ttstr TVPGetStartupPatchPreprocessorPrefix(const ttstr &script) {
+    const tjs_char *start = script.c_str();
+    const tjs_char *cursor = start;
+    const tjs_char *end = start;
+    for(;;) {
+        // Match TJS trivia, including nested block comments. A directive
+        // inside a comment, string, conditional, or function is not a prefix.
+        while(*cursor) {
+            if(*cursor <= TJS_W(' ')) {
+                ++cursor;
+            } else if(cursor[0] == TJS_W('/') && cursor[1] == TJS_W('/')) {
+                while(*cursor && *cursor != TJS_W('\n')) ++cursor;
+            } else if(cursor[0] == TJS_W('/') && cursor[1] == TJS_W('*')) {
+                cursor += 2;
+                int depth = 1;
+                while(*cursor && depth) {
+                    if(cursor[0] == TJS_W('/') && cursor[1] == TJS_W('*')) {
+                        ++depth;
+                        cursor += 2;
+                    } else if(cursor[0] == TJS_W('*') && cursor[1] == TJS_W('/')) {
+                        --depth;
+                        cursor += 2;
+                    } else {
+                        ++cursor;
+                    }
+                }
+                if(depth) return ttstr(start, end - start);
+            } else {
+                break;
+            }
+        }
+        if(TJS_strncmp(cursor, TJS_W("@set"), 4) != 0) break;
+        cursor += 4;
+        while(*cursor && *cursor <= TJS_W(' ')) ++cursor;
+        if(*cursor != TJS_W('(')) break;
+        int depth = 1;
+        ++cursor;
+        while(*cursor && depth) {
+            if(*cursor == TJS_W('(')) ++depth;
+            if(*cursor == TJS_W(')')) --depth;
+            ++cursor;
+        }
+        if(depth) break;
+        end = cursor;
+    }
+    return ttstr(start, end - start);
+}
+
+bool TVPMaskStartupPatchPreprocessorPrefix(ttstr &script,
+                                           const ttstr &prefix) {
+    if(prefix.IsEmpty() || script.GetLen() < prefix.GetLen() ||
+       TJS_strncmp(script.c_str(), prefix.c_str(), prefix.GetLen()) != 0)
+        return false;
+    std::basic_string<tjs_char> masked(script.c_str(), script.GetLen());
+    for(tjs_int index = 0; index < prefix.GetLen(); ++index) {
+        if(masked[index] != TJS_W('\r') && masked[index] != TJS_W('\n'))
+            masked[index] = TJS_W(' ');
+    }
+    script = ttstr(masked.c_str(), masked.size());
+    return true;
+}
+
+static void TVPApplyStartupPatchPreprocessor() {
+    const ttstr patch = TVPGetAppPath() + TJS_W("patch.tjs");
+    if(!TVPIsExistentStorageNoSearch(patch)) return;
+    try {
+        std::unique_ptr<iTJSTextReadStream> stream{
+            TVPCreateTextStreamForRead(patch, TJS_W("")) };
+        ttstr script;
+        stream->Read(script, 0);
+        const ttstr prefix = TVPGetStartupPatchPreprocessorPrefix(script);
+        if(prefix.IsEmpty()) return;
+        TVPExecuteScript(prefix, TJS_W("startup_patch_preprocessor.tjs"), 0,
+                         static_cast<tTJSVariant *>(nullptr));
+        TVPStartupPatchPreprocessorStorage = TVPSearchPlacedPath(patch);
+        TVPStartupPatchPreprocessorPrefix = prefix;
+        spdlog::info("Applied root patch preprocessor configuration before startup");
+    } catch(const TJS::eTJS &e) {
+        spdlog::warn("Root patch preprocessor configuration: {}",
+                     e.GetMessage().AsStdString());
+    }
+}
+
 const tjs_char *TVPGetStartupPatchPrerequisitesScript() {
     return TJS_W(
         "if(typeof global.inSystemMenuStorages == \"undefined\") global.inSystemMenuStorages = [];\n"
@@ -4156,10 +4250,13 @@ void TVPExecuteStartupScript() {
     TVPDeferredRootPatchState.reset();
     TVPDeferredRootPatch.Clear();
     TVPDeferredRootPatchDependency.Clear();
+    TVPStartupPatchPreprocessorStorage.Clear();
+    TVPStartupPatchPreprocessorPrefix.Clear();
 
     ttstr strPatchError;
     try {
         TVPInstallStartupPatchPrerequisites();
+        TVPApplyStartupPatchPreprocessor();
         const ttstr patch = TVPGetAppPath() + TJS_W("patch.tjs");
         if(TVPIsExistentStorageNoSearch(patch)) {
             auto originalBindings = std::make_unique<tTVPStartupPatchState>(TVPScriptEngine, true);
@@ -4208,6 +4305,11 @@ void TVPExecuteStartupScript() {
     } catch(const tjs_char *e) {
         spdlog::error("Startup patch error: {}", ttstr(e).AsStdString());
         strPatchError = e;
+    }
+
+    if(!TVPDeferredRootPatchPending) {
+        TVPStartupPatchPreprocessorStorage.Clear();
+        TVPStartupPatchPreprocessorPrefix.Clear();
     }
 
     if(!strPatchError.IsEmpty()) {
@@ -4298,6 +4400,8 @@ void TVPExecuteStartupScript() {
                 spdlog::error("Deferred startup patch failed: {}", patch.AsStdString());
             }
             TVPDeferredRootPatchPending = false;
+            TVPStartupPatchPreprocessorStorage.Clear();
+            TVPStartupPatchPreprocessorPrefix.Clear();
             const size_t restoredCallableCount =
                 TVPRestoreMissingGlobalCallableMembers(
                     savedGlobalCallables);
