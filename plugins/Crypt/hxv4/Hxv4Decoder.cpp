@@ -144,8 +144,7 @@ void Hxv4DecoderPlugin::Initialize() {
     TVPRegisterStorageMedia(s_virtualMedia);
     TVPRegisterStorageResolver(&Hxv4DecoderPlugin::StorageResolverCallback);
     TVPRegisterXP3UnknownChunkFilter(&Hxv4DecoderPlugin::UnknownChunkCallback);
-    s_prevExtractionFilter = TVPXP3ArchiveExtractionFilter;
-    TVPSetXP3ArchiveExtractionFilter(&Hxv4DecoderPlugin::ExtractionFilterCallback);
+    s_prevExtractionFilter = nullptr;
     s_lazyLoadAttempted = false;
     s_rawChunks.clear();
     s_initialized = true;
@@ -203,6 +202,13 @@ void Hxv4DecoderPlugin::UnknownChunkCallback(tTVPXP3Archive *archive, tTJSBinary
             
             std::lock_guard<std::mutex> lock(s_rawChunksMutex);
             s_rawChunks.push_back(std::move(rd));
+            // Register only after an Hxv4 chunk identifies this format. An
+            // idle callback on every game masks the core's built-in XP3
+            // decoders even though it has no matching files to process.
+            if (TVPXP3ArchiveExtractionFilter != &Hxv4DecoderPlugin::ExtractionFilterCallback) {
+                s_prevExtractionFilter = TVPXP3ArchiveExtractionFilter;
+                TVPSetXP3ArchiveExtractionFilter(&Hxv4DecoderPlugin::ExtractionFilterCallback);
+            }
         }
     }
 }
