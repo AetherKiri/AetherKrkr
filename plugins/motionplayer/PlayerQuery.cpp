@@ -2746,9 +2746,6 @@ namespace motion {
                     target = tryResolveLayerDispatch(targetValue);
                 }
                 if(target) {
-                    const bool previousForceRasterRender =
-                        renderOwner->_forceMotionRasterRender;
-                    renderOwner->_forceMotionRasterRender = true;
                     renderOwner->_autoProgressRendering = true;
                     try {
                         // The normal selector frame may be translucent. Clear
@@ -2792,8 +2789,6 @@ namespace motion {
                                 variableKey);
                         }
                     }
-                    renderOwner->_forceMotionRasterRender =
-                        previousForceRasterRender;
                     renderOwner->_autoProgressRendering = false;
                 }
             }

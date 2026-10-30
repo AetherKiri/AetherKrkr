@@ -2921,17 +2921,6 @@ namespace motion {
                             0.0, std::nextafter(totalFrames, 0.0));
                     }
 
-                    // The numbered title character clips contain an authored
-                    // transition-out tail after frame 70.  The title's parent
-                    // keeps those cards on screen, so retain the fully visible
-                    // pose while still honoring each card's staggered start.
-                    if(childClip->label == "charmove" &&
-                       child._motionParentPlayer &&
-                       detail::narrow(child._motionParentPlayer->_chara)
-                               .rfind("title_bg", 0) == 0) {
-                        renderTime = std::min(renderTime, 70.0);
-                    }
-
                     bool sampledStateChanged =
                         child._clampedEvalTime != renderTime;
                     child._clampedEvalTime = renderTime;
