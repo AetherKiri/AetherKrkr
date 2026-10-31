@@ -28,7 +28,6 @@ set(BASE_SOURCE_FILES
     ${BASE_PATH}/UtilStreams.cpp
     ${BASE_PATH}/XP3Archive.cpp
     ${BASE_PATH}/XP3ArchiveCxDecoder.cpp
-    ${BASE_PATH}/XP3ArchiveHashDecoder.cpp
     ${BASE_PATH}/ZIPArchive.cpp
     ${BASE_PATH}/KAGParser.cpp
     ${BASE_PATH}/MsgIntf.cpp

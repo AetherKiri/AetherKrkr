@@ -206,8 +206,6 @@ class tTVPXP3ArchiveStream : public tTJSBinaryStream {
     tTVPSegmentData *SegmentData; // uncompressed segment data
 
     bool SegmentOpened;
-    bool HashDecoderChecked = false;
-    bool UseHashDecoder = false;
     tTJSVariant FilterContext;
 
 public:
@@ -223,7 +221,6 @@ private:
     void EnsureSegment(); // ensure accessing to current segment
     void SeekToPosition(tjs_uint64 pos); // open segment at 'pos' and seek
     bool OpenNextSegment();
-    void DetectHashDecoder();
 
 public:
     tjs_uint64 Seek(tjs_int64 offset, tjs_int whence) override;

@@ -13,7 +13,6 @@
 
 #include "XP3Archive.h"
 #include "XP3ArchiveCxDecoder.h"
-#include "XP3ArchiveHashDecoder.h"
 #include "MsgIntf.h"
 #include "DebugIntf.h"
 #include "EventIntf.h"
@@ -1197,42 +1196,7 @@ tjs_uint64 tTVPXP3ArchiveStream::Seek(tjs_int64 offset, tjs_int whence) {
 }
 
 //---------------------------------------------------------------------------
-void tTVPXP3ArchiveStream::DetectHashDecoder() {
-    HashDecoderChecked = true;
-    // Explicit game filters take precedence. Cx has its own selection path.
-    if(TVPXP3ArchiveExtractionFilter ||
-       (Owner->IsFileProtected(StorageIndex) &&
-        TVPIsBuiltinXP3CxDecoderActive()))
-        return;
-
-    const auto position = CurPos;
-    const auto hash = Owner->GetFileHash(StorageIndex);
-    std::array<tjs_uint8, 64> header{};
-    SetPosition(0);
-    const auto size = Read(header.data(), header.size());
-    if(TVPIsXP3HashDecoderCandidate(hash, header.data(), size)) {
-        // Translated/repacked archives may mix plain and encrypted entries,
-        // and this format need not set FILE_PROTECTED. Select per stream and
-        // require the entire decoded payload to match its stored checksum.
-        // The segment cache always retains the original, undecoded bytes.
-        UseHashDecoder = true;
-        SetPosition(0);
-        std::array<tjs_uint8, 64 * 1024> block{};
-        auto checksum = adler32(0, Z_NULL, 0);
-        tjs_uint64 total = 0;
-        while(const auto read = Read(block.data(), block.size())) {
-            checksum = adler32(checksum, block.data(), read);
-            total += read;
-        }
-        UseHashDecoder = total == OrgSize && checksum == hash;
-    }
-    SetPosition(position);
-}
-
-//---------------------------------------------------------------------------
 tjs_uint tTVPXP3ArchiveStream::Read(void *buffer, tjs_uint read_size) {
-    if(read_size && !HashDecoderChecked)
-        DetectHashDecoder();
     EnsureSegment();
 
     tjs_uint write_size = 0;
@@ -1263,10 +1227,6 @@ tjs_uint tTVPXP3ArchiveStream::Read(void *buffer, tjs_uint read_size) {
                 Owner->GetFileHash(StorageIndex), Owner->GetName(StorageIndex));
             TVPXP3ArchiveExtractionFilter((tTVPXP3ExtractionFilterInfo *)&info,
                                           &FilterContext);
-        } else if(UseHashDecoder) {
-            TVPDecodeXP3Hash(Owner->GetFileHash(StorageIndex), CurPos,
-                             static_cast<tjs_uint8 *>(buffer) + write_size,
-                             one_size);
         } else if(Owner->IsFileProtected(StorageIndex) &&
                   TVPIsBuiltinXP3CxDecoderActive()) {
             // The Cx scheme is selected by the protected startup entry in
