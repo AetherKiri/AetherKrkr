@@ -31,6 +31,7 @@ add_executable(motionplayer-dll
     textrender-timing.cpp
     text-stream.cpp
     xp3-cx-decoder.cpp
+    hxv4-filter-registration.cpp
     font-compat.cpp
     font-baseline.cpp
     godot-texture.cpp

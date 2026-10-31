@@ -193,6 +193,17 @@ void TVPBeforeSystemInit() {
         TVPAddAutoPath(TVPProjectDir);
     }
     TVPSetCurrentDirectory(TVPProjectDir);
+    if(TVPProjectDir.GetLastChar() == TJS_W('/') &&
+       !TVPIsExistentStorageNoSearch(TVPProjectDir + TJS_W("startup.tjs"))) {
+        const ttstr dataDirectory = TVPProjectDir + TJS_W("data/");
+        if(TVPIsExistentStorageNoSearch(dataDirectory + TJS_W("startup.tjs"))) {
+            // An unpacked data/ replaces data.xp3, but the executable,
+            // sibling resource archives and savedata still belong to the
+            // outer game directory. Change only script-relative resolution.
+            TVPAddAutoPath(dataDirectory);
+            TVPSetCurrentDirectory(dataDirectory);
+        }
+    }
     // randomize
     TVPInitRandomGenerator();
 
