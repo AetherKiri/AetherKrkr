@@ -359,6 +359,7 @@ namespace motion {
                         const auto updateStarted =
                             std::chrono::steady_clock::now();
                         layer->Update(false);
+                        layer->MarkMotionImageForTransfer();
                         const double updateMs =
                             std::chrono::duration<double, std::milli>(
                                 std::chrono::steady_clock::now() -
@@ -402,6 +403,7 @@ namespace motion {
 
             const auto updateStarted = std::chrono::steady_clock::now();
             layer->Update(false);
+            layer->MarkMotionImageForTransfer();
             const double updateMs = std::chrono::duration<double, std::milli>(
                                         std::chrono::steady_clock::now() -
                                         updateStarted)

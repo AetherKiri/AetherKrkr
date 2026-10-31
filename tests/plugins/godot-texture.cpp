@@ -335,6 +335,30 @@ TEST_CASE("Godot GPU barrier planner separates Live2D epochs") {
     CHECK(planner.counters().barriers == 2);
 }
 
+TEST_CASE("Godot GPU glyph recoloring waits for previous scratch readers") {
+    GodotGpuBarrierShadowPlanner planner;
+    constexpr int64_t glyph = 51, gradient = 52, message = 53;
+
+    // The first glyph mask is already available at the start of the batch.
+    // Composite it into the message, then recolor the same scratch surface.
+    CHECK_FALSE(planner.record({glyph, message}, {message}).barrier);
+    const auto recolor = planner.record({gradient, glyph}, {glyph});
+    CHECK(recolor.barrier);
+    CHECK(recolor.war);
+    CHECK_FALSE(recolor.raw);
+    CHECK_FALSE(recolor.waw);
+
+    const auto composite = planner.record({glyph, message}, {message});
+    CHECK(composite.barrier);
+    CHECK(composite.raw);
+    // Clearing for the next glyph must also wait for the final reader.
+    const auto clear = planner.record({}, {glyph});
+    CHECK(clear.barrier);
+    CHECK(clear.war);
+    CHECK_FALSE(clear.waw);
+    CHECK_FALSE(planner.record({61, 62}, {62}).barrier);
+}
+
 TEST_CASE("Godot textures expose asynchronous GPU readback") {
     TestGpuBridge bridge;
     std::array<std::uint8_t, 8> pixels{};

@@ -58,28 +58,6 @@ namespace {
                 std::chrono::steady_clock::now().time_since_epoch()).count());
     }
 
-    std::uint64_t motionRasterThrottleIntervalUs() {
-        static const std::uint64_t intervalUs = [] {
-            // A 30 Hz publish cap keeps the authored transition clock and
-            // input processing at the host tick rate while preventing an
-            // expensive non-emote full-canvas raster from running twice
-            // before the previous surface can be presented.  Set the value
-            // to 0 for strict legacy every-tick rendering.
-            const char *value =
-                std::getenv("AETHERKIRI_MOTION_RASTER_THROTTLE_MS");
-            if(!value || !*value) return std::uint64_t{33333};
-            char *end = nullptr;
-            const double milliseconds = std::strtod(value, &end);
-            if(end == value || !std::isfinite(milliseconds) ||
-               milliseconds <= 0.0) {
-                return std::uint64_t{0};
-            }
-            const double clamped = std::min(milliseconds, 1000.0);
-            return static_cast<std::uint64_t>(clamped * 1000.0);
-        }();
-        return intervalUs;
-    }
-
     struct BgraReadbackStats {
         int minimumX = 0;
         int minimumY = 0;
@@ -12622,36 +12600,11 @@ namespace motion {
             return false;
         }
 
-        // AffineSourceMotion's non-emote path is a CPU full-canvas raster.
-        // Its timer can run at 60 Hz even when the previous raster already
-        // consumed the whole frame budget. Reuse the last completed surface
-        // for a short, configurable interval; progress/evaluation still runs
-        // every tick, so the motion clock and input remain responsive while
-        // presentation is bounded at 30 Hz by default.
-        const std::uint64_t rasterThrottleUs =
-            motionRasterThrottleIntervalUs();
-        const std::uint64_t rasterNowUs = motionRenderProfileNowUs();
-        const bool sameRasterTarget =
-            _runtime->lastMotionRasterTarget.Type() == tvtObject &&
-            _runtime->lastMotionRasterTarget.AsObjectNoAddRef() ==
-                resolvedLayerObject &&
-            _runtime->lastMotionRasterMotion == motionPath &&
-            _runtime->lastMotionRasterWidth == canvasWidth &&
-            _runtime->lastMotionRasterHeight == canvasHeight &&
-            _runtime->lastMotionRasterPublishUs != 0 &&
-            rasterNowUs >= _runtime->lastMotionRasterPublishUs &&
-            rasterNowUs - _runtime->lastMotionRasterPublishUs <
-                rasterThrottleUs;
-        auto *cachedRasterLayer = resolveNativeLayer(renderLayerObject);
-        if(!_forceMotionRasterRender && !_runtime->isEmoteMode && !skipUpdate &&
-           rasterThrottleUs != 0 &&
-           sameRasterTarget && cachedRasterLayer &&
-           cachedRasterLayer->GetHasImage()) {
-            _runtime->lastCanvas =
-                tTJSVariant(resolvedLayerObject, resolvedLayerObject);
-            return true;
-        }
-
+        // The caller owns this surface and may clear it before every draw.
+        // Never skip a draw based on elapsed wall time: that can publish the
+        // cleared image, including the last frame of a completed animation.
+        // Exact command-signature reuse below still republishes an immutable
+        // rendered bitmap and preserves the authored animation state.
         if(renderLayerObject != resolvedLayerObject) {
             if(!prepareLayerForRender(renderLayerObject, canvasWidth,
                                       canvasHeight, 0x00000000)) {
@@ -12852,14 +12805,6 @@ namespace motion {
 
         _runtime->lastCanvas =
             tTJSVariant(resolvedLayerObject, resolvedLayerObject);
-        if(!_runtime->isEmoteMode && !skipUpdate) {
-            _runtime->lastMotionRasterTarget =
-                tTJSVariant(resolvedLayerObject, resolvedLayerObject);
-            _runtime->lastMotionRasterMotion = motionPath;
-            _runtime->lastMotionRasterWidth = canvasWidth;
-            _runtime->lastMotionRasterHeight = canvasHeight;
-            _runtime->lastMotionRasterPublishUs = motionRenderProfileNowUs();
-        }
         detail::logoChainTraceSummary(
             motionPath, "renderToLayer", _clampedEvalTime,
             skipUpdate ? "skipUpdate=1" : "skipUpdate=0");
@@ -14107,19 +14052,6 @@ namespace motion {
         // player+456 is the selected clip/timeline eval time consumed by
         // Player_updateLayers (0x6BB33C), not an arbitrary primary-label entry.
         _clampedEvalTime = activeClipTime(*_runtime, selectActiveClip());
-
-        // title_bg3..6 are the four character title cards. Their nested
-        // `charmove` clip contains a transition-out tail (70..90), while the
-        // parent title keeps rendering through the logo settle at frame 165.
-        // Keep the nested player on its authored fully-visible pose so the
-        // character remains part of the completed title card.
-        if(_motionParentPlayer && activeClipBeforeProgress &&
-           activeClipBeforeProgress->label == "charmove" &&
-           _runtime->activeMotion &&
-           isYuzuNumberedTitleCharacterMotion(
-               _runtime->activeMotion->path)) {
-            _clampedEvalTime = std::min(_clampedEvalTime, 70.0);
-        }
 
         // krkrsdl3's Player (isMotion=true) stops non-loop motion clips by
         // syncTime, then selfSyncTime, then lastTime. Yuzu logo clips rely on

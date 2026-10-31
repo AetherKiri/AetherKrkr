@@ -4,6 +4,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <array>
 #include <chrono>
@@ -28,6 +29,8 @@
 #include "motionplayer/ResourceManager.h"
 #include "motionplayer/RuntimeSupport.h"
 #include "ncbind.hpp"
+#include "LayerImpl.h"
+#include "tvpgl.h"
 #include "ScriptMgnIntf.h"
 #include "StorageIntf.h"
 #include "SysInitIntf.h"
@@ -72,6 +75,20 @@ namespace motion {
             player.calcBounds();
             return { player._boundsMinX, player._boundsMinY,
                      player._boundsMaxX, player._boundsMaxY };
+        }
+
+        static detail::PlayerRuntime &evaluateLayers(Player &player) {
+            player.ensureNodeTreeBuilt();
+            player.updateLayers();
+            return *player._runtime;
+        }
+
+        static bool renderLayer(Player &player, iTJSDispatch2 *target) {
+            return player.renderToLayer(target);
+        }
+
+        static double evaluatedTime(const Player &player) {
+            return player._clampedEvalTime;
         }
 
         static void setNativeBackend(
@@ -2167,6 +2184,173 @@ TEST_CASE("motionplayer non-loop motion clips finish at sync boundary") {
     REQUIRE_FALSE(autoPlayer.getTimelinePlaying(TJS_W("logo")));
     REQUIRE_FALSE(autoPlayer.getAllplaying());
     REQUIRE(autoPlayer.getProgressCompat() == Catch::Approx(1.0));
+}
+
+TEST_CASE("motionplayer repaints a caller-cleared layer on consecutive draws") {
+    ensurePluginRuntime();
+    TVPInitTVPGL();
+    class Surface final : public tTJSDispatch {
+    public:
+        tTJSNI_Layer layer;
+        Surface() {
+            layer.SetHasImage(true);
+            layer.SetSize(2, 2);
+            layer.SetImageSize(2, 2);
+            layer.SetClip(0, 0, 2, 2);
+        }
+        ~Surface() override { layer.Invalidate(); }
+        tjs_error NativeInstanceSupport(
+            tjs_uint32 flag, tjs_int32 classId,
+            iTJSNativeInstance **instance) override {
+            if(flag == TJS_NIS_GETINSTANCE && classId == tTJSNC_Layer::ClassID) {
+                *instance = &layer;
+                return TJS_S_OK;
+            }
+            return TJS_E_FAIL;
+        }
+    };
+    auto *surface = new Surface;
+    tTJSVariant target(surface, surface);
+    surface->Release();
+
+    auto pixels = std::make_shared<PSB::PSBResource>();
+    pixels->data = { 32, 64, 96, 255, 32, 64, 96, 255,
+                     32, 64, 96, 255, 32, 64, 96, 255 };
+    auto icon = std::make_shared<PSB::PSBDictionary>();
+    icon->emplace("width", std::make_shared<PSB::PSBNumber>(2));
+    icon->emplace("height", std::make_shared<PSB::PSBNumber>(2));
+    icon->emplace("pixel", pixels);
+    auto icons = std::make_shared<PSB::PSBDictionary>();
+    icons->emplace("sprite", icon);
+    auto group = std::make_shared<PSB::PSBDictionary>();
+    group->emplace("icon", icons);
+    auto sources = std::make_shared<PSB::PSBDictionary>();
+    sources->emplace("tex", group);
+    auto root = std::make_shared<PSB::PSBDictionary>();
+    root->emplace("source", sources);
+    auto content = std::make_shared<PSB::PSBDictionary>();
+    content->emplace("src", std::make_shared<PSB::PSBString>("src/tex/sprite"));
+    auto frame = std::make_shared<PSB::PSBDictionary>();
+    frame->emplace("type", std::make_shared<PSB::PSBNumber>(2));
+    frame->emplace("content", content);
+    auto frames = std::make_shared<PSB::PSBList>(1);
+    frames->push_back(frame);
+    auto layer = std::make_shared<PSB::PSBDictionary>();
+    layer->emplace("label", std::make_shared<PSB::PSBString>("image"));
+    layer->emplace("type", std::make_shared<PSB::PSBNumber>(0));
+    layer->emplace("frameList", frames);
+    auto snapshot = std::make_shared<motion::detail::MotionSnapshot>();
+    snapshot->path = "unit/cleared-surface.mtn";
+    snapshot->root = root;
+    snapshot->width = snapshot->height = 2;
+    snapshot->resourcesByPath.emplace("source/tex/icon/sprite/pixel", pixels);
+    snapshot->mainTimelineLabels = { "show" };
+    auto &clip = snapshot->clipsByLabel["show"];
+    clip.label = "show";
+    clip.totalFrames = 2.0;
+    clip.selfSyncTime = 1.0;
+    clip.orderedLayers.push_back(layer);
+
+    motion::Player player;
+    player.loadFromSnapshot(snapshot);
+    REQUIRE(player.playMotionLike_0x6B2284(TJS_W("show"), motion::PlayFlagForce));
+    for(int i = 0; i < 4; ++i) {
+        CAPTURE(i);
+        surface->layer.GetMainImage()->Fill(tTVPRect(0, 0, 2, 2), 0);
+        REQUIRE(surface->layer.GetMainImage()->GetPoint(0, 0) == 0);
+        // Same state, advanced state, then the terminal frame: every draw
+        // must restore pixels even when called within a single refresh.
+        if(i >= 2) player.frameProgress(0.5);
+        REQUIRE(motion::PlayerTestAccess::renderLayer(player, surface));
+        CHECK((surface->layer.GetMainImage()->GetPoint(0, 0) >> 24) == 255);
+    }
+    CHECK_FALSE(player.getAllplaying());
+}
+
+TEST_CASE("motionplayer samples nested entrances through their authored final pose") {
+    ensurePluginRuntime();
+    // The legacy spelling used to trigger a frame-70 hold. Both names must
+    // follow the same authored clock, including the settle after frame 120.
+    const std::string owner = GENERATE("scene", "title_bg1");
+    auto snapshot = std::make_shared<motion::detail::MotionSnapshot>();
+    snapshot->path = "unit/" + owner + ".mtn";
+    const auto makeFrame = [](double time, int type,
+                              const std::string &source, double scale) {
+        auto frame = std::make_shared<PSB::PSBDictionary>();
+        frame->emplace("time", std::make_shared<PSB::PSBNumber>(time));
+        frame->emplace("type", std::make_shared<PSB::PSBNumber>(type));
+        if(type != 0) {
+            auto content = std::make_shared<PSB::PSBDictionary>();
+            content->emplace("src", std::make_shared<PSB::PSBString>(source));
+            content->emplace("mask", std::make_shared<PSB::PSBNumber>(97));
+            content->emplace("zx", std::make_shared<PSB::PSBNumber>(scale));
+            content->emplace("zy", std::make_shared<PSB::PSBNumber>(scale));
+            frame->emplace("content", content);
+        }
+        return frame;
+    };
+    const auto makeLayer = [](const std::string &label, int type,
+                              std::shared_ptr<PSB::PSBList> frames) {
+        auto layer = std::make_shared<PSB::PSBDictionary>();
+        layer->emplace("label", std::make_shared<PSB::PSBString>(label));
+        layer->emplace("type", std::make_shared<PSB::PSBNumber>(type));
+        layer->emplace("frameList", frames);
+        return layer;
+    };
+    auto poseFrames = std::make_shared<PSB::PSBList>(4);
+    poseFrames->push_back(makeFrame(0.0, 2, "blank/16:16:8:8", 1.5));
+    poseFrames->push_back(makeFrame(120.0, 2, "blank/16:16:8:8", 1.0));
+    poseFrames->push_back(makeFrame(130.0, 2, "blank/16:16:8:8", 1.0));
+    poseFrames->push_back(makeFrame(150.0, 0, "", 1.0));
+    auto parentFrames = std::make_shared<PSB::PSBList>(2);
+    parentFrames->push_back(makeFrame(0.0, 2, "motion/" + owner + "/charmove", 1.0));
+    parentFrames->push_back(makeFrame(180.0, 0, "", 1.0));
+    auto &entrance = snapshot->clipsByLabel["charmove"];
+    entrance.owner = owner;
+    entrance.label = "charmove";
+    entrance.totalFrames = 150.0;
+    entrance.selfSyncTime = 130.0;
+    entrance.orderedLayers.push_back(makeLayer("portrait", 0, poseFrames));
+    auto &main = snapshot->clipsByLabel["main"];
+    main.owner = owner;
+    main.label = "main";
+    main.totalFrames = 180.0;
+    main.selfSyncTime = 165.0;
+    main.orderedLayers.push_back(makeLayer("entrance", 3, parentFrames));
+    snapshot->clipsByOwnerAndLabel[owner] = snapshot->clipsByLabel;
+    snapshot->mainTimelineLabels = { "main", "charmove" };
+    snapshot->timelineTotalFrames = { { "main", 180.0 }, { "charmove", 150.0 } };
+
+    motion::Player parent;
+    parent.setChara(motion::detail::widen(owner));
+    parent.loadFromSnapshot(snapshot);
+    REQUIRE(parent.playMotionLike_0x6B2284(TJS_W("main"), motion::PlayFlagForce));
+    parent.frameProgress(140.0);
+    auto &runtime = motion::PlayerTestAccess::evaluateLayers(parent);
+    REQUIRE(runtime.nodes.size() == 2);
+    auto *child = runtime.nodes[1].getChildPlayer();
+    REQUIRE(child != nullptr);
+    CHECK(motion::PlayerTestAccess::evaluatedTime(*child) == Catch::Approx(140.0));
+    auto &childRuntime = motion::PlayerTestAccess::evaluateLayers(*child);
+    REQUIRE(childRuntime.nodes.size() == 2);
+    CHECK(childRuntime.nodes[1].accumulated.m11 == Catch::Approx(1.0));
+    CHECK(childRuntime.nodes[1].accumulated.m22 == Catch::Approx(1.0));
+
+    // Parent-driven sampling must retain the final visible slot at the end.
+    parent.frameProgress(25.0);
+    motion::PlayerTestAccess::evaluateLayers(parent);
+    CHECK(motion::PlayerTestAccess::evaluatedTime(*child) > 149.0);
+    CHECK(motion::PlayerTestAccess::evaluatedTime(*child) < 150.0);
+
+    // The child's ordinary progress path must not impose a filename-based
+    // hold either. Its own synchronization boundary remains authoritative.
+    REQUIRE(child->playMotionLike_0x6B2284(TJS_W("charmove"), motion::PlayFlagForce));
+    child->frameProgress(125.0);
+    CHECK(motion::PlayerTestAccess::evaluatedTime(*child) == Catch::Approx(125.0));
+    child->frameProgress(5.0);
+    CHECK_FALSE(child->getAllplaying());
+    CHECK(motion::PlayerTestAccess::evaluatedTime(*child) > 129.0);
+    CHECK(motion::PlayerTestAccess::evaluatedTime(*child) < 130.0);
 }
 
 TEST_CASE("motionplayer command list invalidates after every progress call") {

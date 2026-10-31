@@ -99,6 +99,16 @@ public:
         TVPAutoMountSiblingXP3Archives();
     }
 
+    void loose(const char *name, const std::string &content) {
+        const auto file = path_ / name;
+        std::filesystem::create_directories(file.parent_path());
+        std::ofstream output(file, std::ios::binary);
+        output << content;
+        REQUIRE(output.good());
+    }
+
+    ttstr storage(const char *name) const { return root_ + ttstr(name); }
+
     std::string read(const tjs_char *name) {
         std::unique_ptr<tTJSBinaryStream> stream(TVPCreateStream(name));
         std::string value(stream->GetSize(), '\0');
@@ -112,6 +122,42 @@ private:
     std::vector<std::string> archives_;
 };
 } // namespace
+
+TEST_CASE("loose KAG Project translations override archive-qualified resources",
+          "[storage][startup]") {
+    ArchiveProject project;
+    project.archive("data.xp3", {{"system/Config.tjs", "original config"},
+                                 {"scenario/first.ks", "original script"},
+                                 {"scenario/scene.ks.scn", "original scene"},
+                                 {"unchanged.txt", "original asset"}});
+    project.loose("Project/Config.tjs", "translated config");
+    project.loose("Project/first.ks", "translated entry");
+    project.loose("Project/scene.ks.scn", "translated scene");
+    project.select("data.xp3");
+    CHECK(project.read(TJS_W("system/Config.tjs")) == "translated config");
+    CHECK(project.read(TJS_W("first.ks")) == "translated entry");
+    CHECK(project.read(project.storage("data.xp3>scenario/scene.ks.scn").c_str()) ==
+          "translated scene");
+    CHECK(project.read(TJS_W("unchanged.txt")) == "original asset");
+    // Resolving the override's own path must terminate without recursion.
+    CHECK(project.read(project.storage("Project/first.ks").c_str()) ==
+          "translated entry");
+
+    struct RestoreDataPath {
+        ttstr previous = TVPDataPath;
+        ~RestoreDataPath() { TVPDataPath = previous; }
+    } restore;
+    TVPDataPath = project.storage("savedata/");
+    project.loose("savedata/first.ks", "saved data");
+    CHECK(project.read(project.storage("savedata/first.ks").c_str()) == "saved data");
+
+    ArchiveProject next;
+    next.archive("data.xp3", {{"first.ks", "next game"}});
+    // An unrelated Project directory is insufficient to enable overrides.
+    next.loose("Project/first.ks", "not a translation");
+    next.select("data.xp3");
+    CHECK(next.read(TJS_W("first.ks")) == "next game");
+}
 
 TEST_CASE("renamed XP3 siblings expose startup and preserve patch overlays",
           "[storage][startup]") {

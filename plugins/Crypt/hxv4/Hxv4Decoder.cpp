@@ -144,8 +144,10 @@ void Hxv4DecoderPlugin::Initialize() {
     TVPRegisterStorageMedia(s_virtualMedia);
     TVPRegisterStorageResolver(&Hxv4DecoderPlugin::StorageResolverCallback);
     TVPRegisterXP3UnknownChunkFilter(&Hxv4DecoderPlugin::UnknownChunkCallback);
-    s_prevExtractionFilter = TVPXP3ArchiveExtractionFilter;
-    TVPSetXP3ArchiveExtractionFilter(&Hxv4DecoderPlugin::ExtractionFilterCallback);
+    // Registration alone must not intercept unrelated archives. A no-op
+    // extraction callback would suppress the engine's built-in Cx decoder.
+    // Install the filter only after an Hxv4 chunk has actually been found.
+    s_prevExtractionFilter = nullptr;
     s_lazyLoadAttempted = false;
     s_rawChunks.clear();
     s_initialized = true;
@@ -158,6 +160,7 @@ void Hxv4DecoderPlugin::Teardown() {
     TVPUnregisterXP3UnknownChunkFilter(&Hxv4DecoderPlugin::UnknownChunkCallback);
     if (s_virtualMedia) { TVPUnregisterStorageMedia(s_virtualMedia); s_virtualMedia->Release(); s_virtualMedia = nullptr; }
     if (TVPXP3ArchiveExtractionFilter == &Hxv4DecoderPlugin::ExtractionFilterCallback) TVPSetXP3ArchiveExtractionFilter(s_prevExtractionFilter);
+    s_prevExtractionFilter = nullptr;
     s_currentSession.reset();
     s_rawChunks.clear();
     s_initialized = false;
@@ -203,6 +206,10 @@ void Hxv4DecoderPlugin::UnknownChunkCallback(tTVPXP3Archive *archive, tTJSBinary
             
             std::lock_guard<std::mutex> lock(s_rawChunksMutex);
             s_rawChunks.push_back(std::move(rd));
+            if (TVPXP3ArchiveExtractionFilter != &Hxv4DecoderPlugin::ExtractionFilterCallback) {
+                s_prevExtractionFilter = TVPXP3ArchiveExtractionFilter;
+                TVPSetXP3ArchiveExtractionFilter(&Hxv4DecoderPlugin::ExtractionFilterCallback);
+            }
         }
     }
 }

@@ -25,6 +25,7 @@
 #include <limits>
 #include <map>
 #include <mutex>
+#include <set>
 #include <vector>
 
 #include "TVPMmapAlloc.h"
@@ -622,6 +623,7 @@ void tTVPXP3Archive::Init(tTJSBinaryStream *st, tjs_int64 off,
                    mappedName->second.Next < mappedName->second.Names.size()) {
                     item.Name =
                         mappedName->second.Names[mappedName->second.Next++];
+                    item.HasMappedName = true;
                 }
                 if(normalizeName)
                     NormalizeInArchiveStorageName(item.Name);
@@ -659,6 +661,22 @@ void tTVPXP3Archive::Init(tTJSBinaryStream *st, tjs_int64 off,
             if(!(index_flag & TVP_XP3_INDEX_CONTINUE))
                 break; // continue reading index when the bit sets
         }
+
+        // A v3 archive can contain a literal-name placeholder alongside the
+        // real file named by hnfn. Keep the mapped file authoritative: exposing
+        // both under the same name lets the archive hash select the placeholder
+        // (for example a startup script reporting a corrupt executable).
+        std::set<ttstr> mappedNames;
+        for(const auto &item : ItemVector) {
+            if(item.HasMappedName)
+                mappedNames.insert(item.Name);
+        }
+        ItemVector.erase(std::remove_if(ItemVector.begin(), ItemVector.end(),
+            [&](const tArchiveItem &item) {
+                return !item.HasMappedName &&
+                    mappedNames.find(item.Name) != mappedNames.end();
+            }), ItemVector.end());
+        Count = static_cast<tjs_int>(ItemVector.size());
 
         // A content hash alone is not enough to select Cx: translated XP3s
         // can retain protected metadata after their payload is already
