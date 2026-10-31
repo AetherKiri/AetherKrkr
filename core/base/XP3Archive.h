@@ -111,6 +111,7 @@ public:
         ttstr Name;
         tjs_uint32 FileHash{};
         tjs_uint32 Flags{};
+        bool HasMappedName = false;
         tjs_uint64 OrgSize{}; // original ( uncompressed ) size
         tjs_uint64 ArcSize{}; // in-archive size
         std::vector<tTVPXP3ArchiveSegment> Segments;

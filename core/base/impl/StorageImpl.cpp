@@ -1568,6 +1568,28 @@ bool TVPSaveStreamToFile(tTJSBinaryStream *st, tjs_uint64 offset,
 // TVPAutoMountSiblingXP3Archives
 //---------------------------------------------------------------------------
 static std::vector<ttstr> TVPAutoMountedPaths;
+static ttstr TVPLooseProjectBase;
+static ttstr TVPLooseProjectOverride;
+
+static bool TVPResolveLooseProjectResource(const ttstr &requested,
+                                           ttstr &resolved) {
+    if(TVPLooseProjectOverride.IsEmpty())
+        return false;
+    const ttstr normalized = TVPNormalizeStorageName(requested);
+    if(normalized.SubString(0, TVPLooseProjectBase.GetLen()) != TVPLooseProjectBase ||
+       normalized.SubString(0, TVPLooseProjectOverride.GetLen()) == TVPLooseProjectOverride)
+        return false;
+    // Loose translation resources replace game assets, never saved data.
+    if(!TVPDataPath.IsEmpty() &&
+       normalized.SubString(0, TVPDataPath.GetLen()) == TVPDataPath)
+        return false;
+    const ttstr candidate = TVPLooseProjectOverride +
+        TVPExtractStorageName(normalized);
+    if(!TVPIsExistentStorageNoSearch(candidate))
+        return false;
+    resolved = candidate;
+    return true;
+}
 
 static std::string TVPLowerASCII(std::string text) {
     std::transform(text.begin(), text.end(), text.begin(),
@@ -1681,6 +1703,9 @@ void TVPAutoMountSiblingXP3Archives() {
     // A process may launch more than one title over its lifetime. Never let a
     // package-selected decoder leak into the next project.
     TVPResetBuiltinXP3CxDecoder();
+    TVPUnregisterStorageResolver(TVPResolveLooseProjectResource);
+    TVPLooseProjectBase.Clear();
+    TVPLooseProjectOverride.Clear();
     TVPAutoMountedPaths.clear();
 
     const bool directoryProject =
@@ -1727,6 +1752,19 @@ void TVPAutoMountSiblingXP3Archives() {
 
     std::string parentPath = nativeParent.AsStdString();
     spdlog::info("AutoMountXP3: nativeParent={}", parentPath);
+
+    // Some KAG translations use a flat Project directory and a Windows DLL
+    // that redirects asset opens into it. Recognize the KAG configuration
+    // and entry script together, then apply that same basename override even
+    // to archive-qualified requests made by the compiled scenario parser.
+    const ttstr looseProject = parentStoragePath + TJS_W("Project/");
+    if(TVPIsExistentStorageNoSearch(looseProject + TJS_W("Config.tjs")) &&
+       TVPIsExistentStorageNoSearch(looseProject + TJS_W("first.ks"))) {
+        TVPLooseProjectBase = TVPNormalizeStorageName(parentStoragePath);
+        TVPLooseProjectOverride = TVPNormalizeStorageName(looseProject);
+        TVPRegisterStorageResolver(TVPResolveLooseProjectResource);
+        TVPAddImportantLog(TJS_W("(info) Enabled loose KAG Project resource overrides"));
+    }
 
     std::vector<std::string> xp3Names;
 

@@ -5807,7 +5807,8 @@ void tTJSNI_BaseLayer::AssignImages(tTJSNI_BaseLayer *src) {
         TVPLayerTransitionTraceEnabled() && src &&
         (GetWidth() >= 512 || GetHeight() >= 512 ||
          src->GetWidth() >= 512 || src->GetHeight() >= 512);
-    if(TVPShouldDeferKagTransitionMotionAssignment(this, src)) {
+    if(src && src->MotionImagePendingTransfer &&
+       TVPShouldDeferKagTransitionMotionAssignment(this, src)) {
         if(assignmentTrace) {
             spdlog::info(
                 "LayerAssign route=defer-transition kind=images target={} source={}",
@@ -5869,7 +5870,11 @@ void tTJSNI_BaseLayer::AssignImages(tTJSNI_BaseLayer *src) {
                 ? static_cast<const void *>(src->MainImage->GetTexture())
                 : nullptr);
     }
-    if(src && src != this && src->GetName().IsEmpty() &&
+    // The hidden AffineSource pool also owns persistent PNG/PSD images.
+    // Layer names and page topology alone cannot authorize a destructive
+    // hand-off: only a completed motion capture supplies a disposable frame.
+    if(src && src != this && src->MotionImagePendingTransfer &&
+       src->GetName().IsEmpty() &&
        !src->GetVisible()) {
         bool use_motion_swap =
             TVPIsKagTransitionMotionAssignment(this, src);
@@ -5890,8 +5895,8 @@ void tTJSNI_BaseLayer::AssignImages(tTJSNI_BaseLayer *src) {
             return;
         }
     }
-    if(auto *visible_target =
-           TVPResolveExchangedKagAssignmentTarget(this, src)) {
+    if(auto *visible_target = src && src->MotionImagePendingTransfer
+           ? TVPResolveExchangedKagAssignmentTarget(this, src) : nullptr) {
         if(assignmentTrace) {
             spdlog::info(
                 "LayerAssign route=exchanged-target target={} source={} resolved={}",
@@ -5905,7 +5910,8 @@ void tTJSNI_BaseLayer::AssignImages(tTJSNI_BaseLayer *src) {
         AssignMotionImages(src);
         return;
     }
-    if(TVPIsAffineSourceMotionScratch(this, src)) {
+    if(src && src->MotionImagePendingTransfer &&
+       TVPIsAffineSourceMotionScratch(this, src)) {
         if(assignmentTrace) {
             spdlog::info(
                 "LayerAssign route=motion-scratch-swap target={} source={}",
@@ -6076,6 +6082,9 @@ void tTJSNI_BaseLayer::AssignImages(tTJSNI_BaseLayer *src) {
         province_changed = true;
     }
 
+    MotionImagePendingTransfer = false;
+    src->MotionImagePendingTransfer = false;
+
     if(!main_changed && !province_changed && !shared_gpu_frame_updated)
         return;
 
@@ -6154,6 +6163,7 @@ void tTJSNI_BaseLayer::AssignMotionImages(tTJSNI_BaseLayer *src) {
         }
     }
     if(!src->MainImage) {
+        src->MotionImagePendingTransfer = false;
         AssignImages(src);
         return;
     }
@@ -6212,6 +6222,8 @@ void tTJSNI_BaseLayer::AssignMotionImages(tTJSNI_BaseLayer *src) {
     }
     const auto swapStarted = std::chrono::steady_clock::now();
     std::swap(MainImage, src->MainImage);
+    MotionImagePendingTransfer = false;
+    src->MotionImagePendingTransfer = false;
     FontChanged = true;
     src->FontChanged = true;
     swapMs = std::chrono::duration<double, std::milli>(

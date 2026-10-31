@@ -453,6 +453,7 @@ protected:
     tjs_uint _evictedImageWidth = 0;
     tjs_uint _evictedImageHeight = 0;
     bool _bitmapEvicted = false;
+    bool MotionImagePendingTransfer = false;
     void EnsureBitmap();
     bool CanHaveImage; // whether the layer can have image
     tTVPBaseBitmap *ProvinceImage;
@@ -473,6 +474,9 @@ protected:
 
 public:
     void AssignImages(tTJSNI_BaseLayer *src); // assign image content
+    // A capture producer may lend its freshly repainted image for one swap.
+    // Ordinary cached images must retain their contents after assignment.
+    void MarkMotionImageForTransfer() { MotionImagePendingTransfer = true; }
     // Transfer a fully repainted motion scratch image without sharing it back
     // to the scratch layer. The destination's previous image becomes the next
     // reusable scratch buffer.
