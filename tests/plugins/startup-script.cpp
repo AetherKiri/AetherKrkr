@@ -4,6 +4,7 @@
 #include "BinaryStream.h"
 #include "StorageIntf.h"
 #include "SysInitIntf.h"
+#include "StartupPatchState.h"
 #include "tjs.h"
 
 #include <chrono>
@@ -112,4 +113,132 @@ TEST_CASE("a missing startup script still enters the framework directly",
     CHECK(fixture.value(TJS_W("startupRuns")) == 0);
     CHECK(fixture.value(TJS_W("fallbackRuns")) == 1);
     CHECK_FALSE(TVPStartupSuccess);
+}
+
+TEST_CASE("an incomplete root patch cannot disable framework script loading",
+          "[startup]") {
+    StartupFixture fixture;
+    auto *scripts = TVPCreateNativeClass_Scripts();
+    tTJSVariant value(scripts);
+    scripts->Release();
+    auto *global = TVPScriptEngine->GetGlobalNoAddRef();
+    REQUIRE(TJS_SUCCEEDED(global->PropSet(TJS_MEMBERENSURE,
+        TJS_W("Scripts"), nullptr, &value, global)));
+    TVPScriptEngine->ExecScript(TJS_W("var patchRuns=0, patchCompleted=0;"));
+    const auto *patch = TJS_W(
+        "global.patchRuns=global.patchRuns+1; global.earlySetting=42;"
+        "Scripts.execStorage=function() {};"
+        "dm(); global.patchCompleted=global.patchCompleted+1;"
+    );
+    fixture.write("patch.tjs", ttstr(patch).AsStdString().c_str());
+    fixture.write("startup.tjs",
+        "global.startupRuns=global.startupRuns+1; Scripts.execStorage('system/Initialize.tjs');");
+    fixture.write("system/Initialize.tjs",
+        "global.fallbackRuns++; global.settingAtInit=earlySetting;"
+        "global.dm=function() {}; global.kag=%[];");
+    SECTION("text scripts") {}
+    SECTION("compiled scripts") {
+        for(const auto *name : {TJS_W("patch.tjs"), TJS_W("startup.tjs")}) {
+            std::unique_ptr<tTJSBinaryStream> output(
+                TVPCreateStream(name, TJS_BS_WRITE));
+            TVPScriptEngine->CompileScript(
+                ttstr(name) == TJS_W("patch.tjs") ? patch : TJS_W(
+                    "global.startupRuns=global.startupRuns+1; Scripts.execStorage('system/Initialize.tjs');"),
+                output.get(), false, false, false, name);
+        }
+        TVPClearStorageCaches();
+    }
+    REQUIRE_NOTHROW(TVPExecuteStartupScript());
+    CHECK(TVPStartupSuccess);
+    CHECK(fixture.value(TJS_W("startupRuns")) == 1);
+    CHECK(fixture.value(TJS_W("fallbackRuns")) == 1);
+    CHECK(fixture.value(TJS_W("settingAtInit")) == 42);
+    CHECK(fixture.value(TJS_W("patchRuns")) == 1);
+    CHECK(fixture.value(TJS_W("patchCompleted")) == 1);
+    // The completed late patch owns the loader again.
+    TVPScriptEngine->ExecScript(TJS_W("Scripts.execStorage('system/Initialize.tjs');"));
+    CHECK(fixture.value(TJS_W("fallbackRuns")) == 1);
+}
+
+TEST_CASE("deferred patches can reapply framework method hooks without recursion",
+          "[startup]") {
+    StartupFixture fixture;
+    auto *scripts = TVPCreateNativeClass_Scripts();
+    tTJSVariant scriptsValue(scripts);
+    scripts->Release();
+    auto *global = TVPScriptEngine->GetGlobalNoAddRef();
+    REQUIRE(TJS_SUCCEEDED(global->PropSet(TJS_MEMBERENSURE,
+        TJS_W("Scripts"), nullptr, &scriptsValue, global)));
+    TVPScriptEngine->ExecScript(TJS_W("var hookCalls=0, baseCalls=0;"));
+    const ttstr hook = TJS_W(
+        "function installWorkerHook(cls) {"
+        " function methods {"
+        "  function clear(value) {"
+        "   global.hookCalls=global.hookCalls+1;"
+        "   if(global.hookCalls>3) throw %[message:'recursive hook'];"
+        "   return savedClear(value)+1;"
+        "  }"
+        " }"
+        " with(cls) { &.savedClear=&methods.clear; &.savedClear <-> &.clear; }"
+        "} installWorkerHook(Worker); delete global.installWorkerHook;"
+    );
+    const ttstr patch = ttstr(TJS_W("Scripts.execStorage=function() {}; dm();")) + hook;
+    const ttstr framework = ttstr(TJS_W(
+        "global.dm=function() {}; global.kag=%[];"
+        "class Worker {"
+        " var seed=7;"
+        " function clear(value) { global.baseCalls=global.baseCalls+1; return seed+value; }"
+        "}"
+        "global.originalClear=&Worker.clear;"
+    )) + hook + TJS_W("global.existingWorker=new Worker();");
+    fixture.write("patch.tjs", patch.AsStdString().c_str());
+    fixture.write("startup.tjs", "Scripts.execStorage('system/Initialize.tjs');");
+    fixture.write("system/Initialize.tjs", framework.AsStdString().c_str());
+    bool compiledPatch = false, compiledFramework = false;
+    SECTION("text patch and framework") {}
+    SECTION("compiled patch and text framework") { compiledPatch = true; }
+    SECTION("text patch and compiled framework") { compiledFramework = true; }
+    SECTION("compiled patch and framework") { compiledPatch = compiledFramework = true; }
+    auto compile = [&](const tjs_char *name, const ttstr &source) {
+        std::unique_ptr<tTJSBinaryStream> output(TVPCreateStream(name, TJS_BS_WRITE));
+        TVPScriptEngine->CompileScript(source.c_str(), output.get(),
+            false, false, false, name);
+    };
+    if(compiledPatch) compile(TJS_W("patch.tjs"), patch);
+    if(compiledFramework) compile(TJS_W("system/Initialize.tjs"), framework);
+    TVPClearStorageCaches();
+
+    REQUIRE_NOTHROW(TVPExecuteStartupScript());
+    REQUIRE(fixture.value(TJS_W("&Worker.savedClear === originalClear")) == 1);
+    CHECK(fixture.value(TJS_W("(new Worker()).clear(4)")) == 12);
+    CHECK(fixture.value(TJS_W("existingWorker.clear(9)")) == 17);
+    CHECK(fixture.value(TJS_W("baseCalls")) == 2);
+    CHECK(fixture.value(TJS_W("hookCalls")) == 2);
+}
+
+TEST_CASE("startup hook reconciliation preserves distinct method replacements",
+          "[startup]") {
+    StartupFixture fixture;
+    TVPScriptEngine->ExecScript(TJS_W(
+        "class Worker { function clear() { return 7; } }"
+        "Worker.savedClear=&Worker.clear;"
+    ));
+    ttstr first, second;
+    SECTION("different wrapper constants") {
+        first = TJS_W("Worker.clear=function() { return savedClear()+1; };");
+        second = TJS_W("Worker.clear=function() { return savedClear()+2; };");
+    }
+    SECTION("an alias name used only as a literal") {
+        first = second = TJS_W("Worker.clear=function() { return 'savedClear'; };");
+    }
+    SECTION("an explicit call on a different object") {
+        first = second = TJS_W("Worker.clear=function() { return global.other.savedClear(); };");
+    }
+    TVPScriptEngine->ExecScript(first.c_str());
+    TVPScriptEngine->ExecScript(TJS_W("global.previousClear=&Worker.clear;"));
+    tTVPStartupPatchState before(TVPScriptEngine);
+    TVPScriptEngine->ExecScript(TJS_W("Worker.savedClear=&Worker.clear;"));
+    TVPScriptEngine->ExecScript(second.c_str());
+    CHECK(before.RestoreReappliedMethodAliases() == 0);
+    CHECK(fixture.value(TJS_W("&Worker.savedClear === previousClear")) == 1);
 }

@@ -21,7 +21,9 @@ public:
     explicit tTVPStartupPatchState(tTJS *engine, bool trackPlugins = false);
     ~tTVPStartupPatchState();
     void SealAttempt();
+    bool RestoreScriptLoader();
     void PrepareRetry();
+    size_t RestoreReappliedMethodAliases();
 };
 
 // Native plugin registrations outlive a failed script. Retain only the

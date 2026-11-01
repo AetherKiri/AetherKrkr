@@ -1,6 +1,7 @@
 #include "StartupPatchState.h"
 #include "tjsArray.h"
 #include "tjsError.h"
+#include "tjsInterCodeGen.h"
 
 #include <algorithm>
 #include <map>
@@ -179,6 +180,90 @@ void tTVPStartupPatchState::SealAttempt() {
         active_ = previous_;
         tracksPlugins_ = false;
     }
+}
+
+bool tTVPStartupPatchState::RestoreScriptLoader() {
+    if(!attempted_) return false;
+    auto *global = engine_->GetGlobalNoAddRef();
+    tTJSVariant scripts;
+    if(TJS_FAILED(global->PropGet(TJS_MEMBERMUSTEXIST | TJS_IGNOREPROP,
+            TJS_W("Scripts"), nullptr, &scripts, global)) ||
+       scripts.Type() != tvtObject || !scripts.AsObjectNoAddRef()) return false;
+    auto *object = scripts.AsObjectNoAddRef();
+    auto findLoader = [object](const State &state) -> const Binding * {
+        for(const auto &saved : state.objects) {
+            if(saved.owner.AsObjectNoAddRef() != object) continue;
+            for(const auto &binding : saved.bindings)
+                if(binding.name == TJS_W("execStorage")) return &binding;
+        }
+        return nullptr;
+    };
+    const auto *original = findLoader(*state_);
+    const auto *partial = findLoader(*attempted_->state_);
+    if(!original || !partial ||
+       original->value.DiscernCompare(partial->value)) return false;
+    tTJSVariant current;
+    if(TJS_FAILED(object->PropGet(TJS_MEMBERMUSTEXIST | TJS_IGNOREPROP,
+            TJS_W("execStorage"), nullptr, &current, object)) ||
+       !current.DiscernCompare(partial->value)) return false;
+
+    // A framework-dependent patch can disable script loading before it
+    // fails. Let startup load the missing framework with the prior loader,
+    // while retaining early settings, class definitions and plugin bindings.
+    // PrepareRetry still reconciles the remaining changes before replay.
+    const auto status = object->PropSet(
+        TJS_MEMBERENSURE | TJS_IGNOREPROP | original->flags,
+        TJS_W("execStorage"), nullptr, &original->value, object);
+    if(TJS_FAILED(status)) TJSThrowFrom_tjs_error(status, TJS_W("execStorage"));
+    return true;
+}
+
+size_t tTVPStartupPatchState::RestoreReappliedMethodAliases() {
+    size_t restored = 0;
+    auto function = [](const tTJSVariant &value) {
+        return value.Type() == tvtObject ?
+            dynamic_cast<tTJSInterCodeContext *>(value.AsObjectNoAddRef()) : nullptr;
+    };
+    for(const auto &saved : state_->objects) {
+        auto *object = saved.owner.AsObjectNoAddRef();
+        std::vector<Binding> current;
+        if(TJS_FAILED(ReadBindings(object, current))) continue;
+        std::map<Name, const Binding *> existing;
+        for(const auto &binding : current)
+            existing.emplace(BindingName(binding.name), &binding);
+        for(const auto &alias : saved.bindings) {
+            const auto found = existing.find(BindingName(alias.name));
+            if(found == existing.end() || alias.value.Type() != tvtObject ||
+               !alias.value.AsObjectNoAddRef() ||
+               alias.value.DiscernCompare(found->second->value)) continue;
+            auto *wrapper = function(found->second->value);
+            if(!wrapper) continue;
+            for(const auto &method : saved.bindings) {
+                if(method.name == alias.name ||
+                   !method.value.DiscernCompare(found->second->value)) continue;
+                const auto replacement = existing.find(BindingName(method.name));
+                if(replacement == existing.end()) continue;
+                auto *reapplied = function(replacement->second->value);
+                if(!reapplied || reapplied == wrapper ||
+                   method.value.AsObjectClosureNoAddRef().ObjThis !=
+                       replacement->second->value.AsObjectClosureNoAddRef().ObjThis ||
+                   !wrapper->IsEquivalentMethodWrapper(*reapplied, alias.name.c_str()))
+                    continue;
+
+                // Before: method -> wrapper -> alias -> original.
+                // Replay: method -> equivalent wrapper -> alias -> old wrapper
+                // which now calls itself through alias. Keep the original
+                // target, so the identical hook still runs exactly once.
+                const auto status = object->PropSet(
+                    TJS_MEMBERENSURE | TJS_IGNOREPROP | alias.flags,
+                    alias.name.c_str(), nullptr, &alias.value, object);
+                if(TJS_FAILED(status)) TJSThrowFrom_tjs_error(status, alias.name.c_str());
+                ++restored;
+                break;
+            }
+        }
+    }
+    return restored;
 }
 
 void tTVPStartupPatchState::PrepareRetry() {
