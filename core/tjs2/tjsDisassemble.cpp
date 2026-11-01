@@ -8,6 +8,7 @@
 //---------------------------------------------------------------------------
 // VM code disassembler
 //---------------------------------------------------------------------------
+#include <algorithm>
 #include <utility>
 
 #include "tjsCommHead.h"
@@ -19,6 +20,47 @@
 //---------------------------------------------------------------------------
 namespace TJS // following is in the namespace
 {
+    bool tTJSInterCodeContext::IsEquivalentMethodWrapper(
+        const tTJSInterCodeContext &other, const tjs_char *alias) {
+        if(ContextType != ctFunction || other.ContextType != ctFunction ||
+           !Block || !CodeArea || !other.CodeArea ||
+           !GetValidity() || !other.GetValidity() ||
+           CodeAreaSize != other.CodeAreaSize ||
+           DataAreaSize != other.DataAreaSize ||
+           VariableReserveCount != other.VariableReserveCount ||
+           MaxFrameCount != other.MaxFrameCount ||
+           MaxVariableCount != other.MaxVariableCount ||
+           FuncDeclArgCount != other.FuncDeclArgCount ||
+           FuncDeclUnnamedArgArrayBase != other.FuncDeclUnnamedArgArrayBase ||
+           FuncDeclCollapseBase != other.FuncDeclCollapseBase ||
+           !std::equal(CodeArea, CodeArea + CodeAreaSize, other.CodeArea))
+            return false;
+        for(tjs_int i = 0; i < DataAreaSize; ++i)
+            if(!DataArea[i].DiscernCompare(other.DataArea[i])) return false;
+
+        struct CallSearch {
+            const tTJSVariant *constants;
+            tjs_int count;
+            const tjs_char *alias;
+            bool found = false;
+        } search{DataArea, DataAreaSize, alias};
+        // Reuse the instruction decoder so operands and expanded arguments
+        // cannot be mistaken for opcodes. No script is executed here.
+        Disassemble([](const tjs_char *, const tjs_char *, tjs_int,
+                       const tjs_int32 *code, tjs_int size, void *opaque) {
+            auto &search = *static_cast<CallSearch *>(opaque);
+            if(size < 5 || code[0] != VM_CALLD) return;
+            const auto receiver = TJS_FROM_VM_REG_ADDR(code[2]);
+            const auto index = TJS_FROM_VM_REG_ADDR(code[3]);
+            if((receiver != -1 && receiver != -2) ||
+               index < 0 || index >= search.count) return;
+            const auto &name = search.constants[index];
+            if(name.Type() == tvtString && ttstr(name) == search.alias)
+                search.found = true;
+        }, [](const tjs_char *, const tjs_char *, tjs_int, void *) {}, &search);
+        return search.found;
+    }
+
     //---------------------------------------------------------------------------
     tTJSString tTJSInterCodeContext::GetValueComment(const tTJSVariant &val) {
         // make val a human readable string and return it

@@ -547,6 +547,12 @@ namespace TJS {
 
         tjs_uint GetDataSize() const { return DataAreaSize; }
 
+        // Conservative identity check for a recompiled method wrapper.
+        // Requires identical executable data and a direct call to the alias
+        // on this (or the this/global proxy); source filenames may differ.
+        bool IsEquivalentMethodWrapper(const tTJSInterCodeContext &other,
+                                       const tjs_char *alias);
+
         tjs_int CodePosToSrcPos(tjs_int codepos) const;
 
         tjs_int FindSrcLineStartCodePos(tjs_int codepos) const;

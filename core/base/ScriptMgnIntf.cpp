@@ -3186,12 +3186,29 @@ void TVPExecuteStorage(const ttstr &name, iTJSDispatch2 *context,
     // A deferred patch may replace a class and use its pre-existing static
     // instance before assigning a new one later in the same script.
     std::unique_ptr<tTJSMemberWriteScope> inheritedMembers;
+    struct ReplayState {
+        std::unique_ptr<tTVPStartupPatchState> before;
+        ~ReplayState() {
+            if(!before) return;
+            try {
+                const auto count = before->RestoreReappliedMethodAliases();
+                if(count)
+                    spdlog::info("Restored original targets for {} reapplied method hooks", count);
+            } catch(const TJS::eTJS &error) {
+                spdlog::warn("Deferred patch method reconciliation failed: {}",
+                             error.GetMessage().AsStdString());
+            } catch(...) {
+                spdlog::warn("Deferred patch method reconciliation failed");
+            }
+        }
+    } replayState;
     if(TVPDeferredRootPatchPending && resolvedPlace == TVPDeferredRootPatch &&
        !context && !isexpression) {
         if(TVPDeferredRootPatchState) {
             TVPDeferredRootPatchState->PrepareRetry();
             TVPDeferredRootPatchState.reset();
         }
+        replayState.before = std::make_unique<tTVPStartupPatchState>(TVPScriptEngine);
         inheritedMembers = std::make_unique<tTJSMemberWriteScope>(
             TVPScriptEngine->GetGlobalNoAddRef(), TVPInheritDeferredPatchMembers);
     }
@@ -4269,6 +4286,8 @@ void TVPExecuteStartupScript() {
                 if(dependency.IsEmpty() ||
                    !TVPIsExistentStorage(TJS_W("system/Initialize.tjs"))) throw;
                 originalBindings->SealAttempt();
+                if(originalBindings->RestoreScriptLoader())
+                    spdlog::info("Restored script loader for framework startup after incomplete patch");
                 TVPDeferredRootPatchState = std::move(originalBindings);
                 TVPDeferredRootPatch = TVPSearchPlacedPath(patch);
                 TVPDeferredRootPatchDependency = dependency;
