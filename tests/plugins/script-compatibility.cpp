@@ -59,6 +59,63 @@ bool noMovieExists(const ttstr &) { return false; }
 
 } // namespace
 
+TEST_CASE("optional log pad guard preserves supported log windows and arguments",
+          "[log-pad]") {
+    ScriptEngineOwner engine;
+    engine->ExecScript(TJS_W(
+        "class Krkr2CompatUtils {}"
+        "class LogWindowPad {}"
+        "var LogWindow=LogWindowPad;"
+        "class KAGWindow {"
+        " var calls=0, args=void;"
+        " function initLogPad(a,b,c) { calls++; args=[a,b,c]; return 42; }"
+        "}"
+    ));
+    bool supported = false;
+    SECTION("unsupported Win32 dialog") {
+        engine->ExecScript(TJS_W("class WIN32Dialog {}"));
+    }
+    SECTION("Win32 dialog plugin is not loaded") {}
+    SECTION("only a dialog header is available") {
+        engine->ExecScript(TJS_W(
+            "class WIN32Dialog {} class DialogHeader {}"
+            "WIN32Dialog.Header=DialogHeader;"));
+    }
+    SECTION("dialog templates are available") {
+        engine->ExecScript(TJS_W(
+            "class WIN32Dialog {}"
+            "class DialogHeader {} class DialogItems {}"
+            "WIN32Dialog.Header=DialogHeader; WIN32Dialog.Items=DialogItems;"));
+        supported = true;
+    }
+    SECTION("custom log window does not need Win32 dialogs") {
+        engine->ExecScript(TJS_W("class CustomLogWindow {} LogWindow=CustomLogWindow;"));
+        supported = true;
+    }
+    SECTION("a native Pad without k2compat is preserved") {
+        engine->ExecScript(TJS_W("delete global.Krkr2CompatUtils;"));
+        supported = true;
+    }
+    // Repeated script loading must not wrap the original recursively.
+    REQUIRE_NOTHROW(engine->ExecScript(TVPGetOptionalLogPadGuardScript()));
+    REQUIRE_NOTHROW(engine->ExecScript(TVPGetOptionalLogPadGuardScript()));
+    REQUIRE_NOTHROW(engine->ExecScript(TJS_W(
+        "var window=new KAGWindow(); var returned=window.initLogPad(7,9,'extra');")));
+    CHECK(evaluateInteger(engine.operator->(), TJS_W("window.calls")) ==
+          (supported ? 1 : 0));
+    if(supported) {
+        CHECK(evaluateInteger(engine.operator->(), TJS_W(
+            "returned==42 && window.args.count==3 && window.args[0]==7 &&"
+            "window.args[1]==9 && window.args[2]=='extra'")) == 1);
+    }
+    // A renderer-backed replacement can still report its own real failure.
+    engine->ExecScript(TJS_W(
+        "class BrokenLogWindow {} LogWindow=BrokenLogWindow;"
+        "KAGWindow.__aetherKiriOrigInitLogPad=function(*) { global.logWindowFailure(); };"));
+    CHECK_THROWS_AS(engine->ExecScript(TJS_W("window.initLogPad();")),
+                    TJS::eTJSScriptError);
+}
+
 TEST_CASE("Packed message colors use the layer renderer with intact arguments",
           "[textrender][gradient-routing]") {
     ScriptEngineOwner engine;
