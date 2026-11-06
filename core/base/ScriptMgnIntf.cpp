@@ -2654,6 +2654,33 @@ static void TVPExecuteTextScriptWithRecovery(const ttstr &script,
     }
 }
 
+const tjs_char *TVPGetOptionalLogPadGuardScript() {
+    // A saved KAG logMode can request the legacy Pad even with -debugwin=no.
+    // k2compat lazily creates that Pad through Win32 modeless dialogs, which
+    // the portable message-box plugin cannot provide. Check before touching
+    // Pad: even typeof Pad invokes its lazy getter and can abort startup.
+    // Keep the setting and custom log windows intact; this is only the
+    // optional k2compat LogWindowPad, not a general script-error recovery.
+    return TJS_W(
+        "(function() {\n"
+        " if (typeof global.KAGWindow != 'Object' ||\n"
+        "     typeof global.KAGWindow.initLogPad != 'Object' ||\n"
+        "     typeof global.KAGWindow.__aetherKiriOrigInitLogPad != 'undefined') return;\n"
+        " global.KAGWindow.__aetherKiriOrigInitLogPad = &global.KAGWindow.initLogPad;\n"
+        " global.KAGWindow.initLogPad = function(*) {\n"
+        "  if (typeof global.Krkr2CompatUtils == 'Object' &&\n"
+        "      typeof global.LogWindowPad == 'Object' &&\n"
+        "      typeof global.LogWindow == 'Object' &&\n"
+        "      global.LogWindow === global.LogWindowPad &&\n"
+        "      (typeof this.LogWindow == 'undefined' || this.LogWindow === global.LogWindowPad) &&\n"
+        "      (typeof global.WIN32Dialog != 'Object' ||\n"
+        "       typeof global.WIN32Dialog.Header != 'Object' ||\n"
+        "       typeof global.WIN32Dialog.Items != 'Object')) return;\n"
+        "  return (global.KAGWindow.__aetherKiriOrigInitLogPad incontextof this)(*);\n"
+        " };\n"
+        "})();\n");
+}
+
 const tjs_char *TVPGetMessageEdgeArgumentPatchScript() {
     return TJS_W(
         "(function() {\r\n"
@@ -2905,8 +2932,9 @@ static void TVPApplyPostScriptCompatibilityPatches(const ttstr &shortname) {
     const bool patchQuickMenu = lower == TJS_W("quickmenu.tjs");
     const bool patchSimpleAnim = lower == TJS_W("simpleanim.tjs");
     const bool patchAction = lower == TJS_W("action.tjs");
+    const bool patchLogPad = lower == TJS_W("mainwindow.tjs");
     const bool patchDialogTrace = lower == TJS_W("dialoglayer.tjs") ||
-                                  lower == TJS_W("mainwindow.tjs");
+                                  patchLogPad;
     const bool patchUiAutoTrace = lower == TJS_W("uiloader.tjs") ||
                                   lower == TJS_W("saveload.tjs") ||
                                   lower == TJS_W("uimain.tjs") ||
@@ -2919,6 +2947,14 @@ static void TVPApplyPostScriptCompatibilityPatches(const ttstr &shortname) {
        !patchSimpleAnim && !patchAction && !patchDialogTrace &&
        !patchUiAutoTrace && !patchMultiLangSingle)
         return;
+
+    if(patchLogPad) try {
+        TVPExecuteScript(TVPGetOptionalLogPadGuardScript(),
+                         TJS_W("AetherKiriOptionalLogPadGuard"), 0,
+                         (tTJSVariant *)nullptr);
+    } catch(...) {
+        spdlog::warn("Failed to guard optional Win32 log pad");
+    }
 
     if(patchMultiLangSingle) {
         try {

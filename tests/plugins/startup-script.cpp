@@ -115,6 +115,52 @@ TEST_CASE("a missing startup script still enters the framework directly",
     CHECK_FALSE(TVPStartupSuccess);
 }
 
+TEST_CASE("restored KAG logging does not require a native Win32 debug pad",
+          "[startup][log-pad]") {
+    StartupFixture fixture;
+    TVPScriptEngine->ExecScript(TJS_W(
+        "var padRequests=0, storyReady=0;"
+        "var savedSettings=%[logMode:1];"
+        "class WIN32Dialog {}"
+        "class Krkr2CompatUtils {}"
+        "class LogWindowPad {}"
+        "var LogWindow=LogWindowPad;"
+        "property Pad { getter { global.padRequests++; return WIN32Dialog.Header; } }"
+    ));
+    const auto *framework = TJS_W(
+        "class KAGWindow {"
+        " var logMode=0, logPad=void;"
+        " function KAGWindow() {"
+        "  this.logMode=global.savedSettings.logMode;"
+        "  if(this.logMode) this.initLogPad(0);"
+        "  global.storyReady=global.storyReady+1;"
+        " }"
+        " function initLogPad(position=0, clear=0) {"
+        "  if(typeof global.Pad=='undefined') return;"
+        "  logPad=new LogWindow();"
+        " }"
+        "}"
+    );
+    fixture.write("system/mainwindow.tjs", ttstr(framework).AsStdString().c_str());
+    SECTION("text framework") {}
+    SECTION("compiled framework") {
+        std::unique_ptr<tTJSBinaryStream> output(
+            TVPCreateStream(TJS_W("system/mainwindow.tjs"), TJS_BS_WRITE));
+        TVPScriptEngine->CompileScript(framework, output.get(), false, false,
+                                       false, TJS_W("mainwindow.tjs"));
+        output.reset();
+        TVPClearStorageCaches();
+    }
+    REQUIRE_NOTHROW(TVPExecuteStorage(TJS_W("system/mainwindow.tjs")));
+    REQUIRE_NOTHROW(TVPScriptEngine->ExecScript(TJS_W(
+        "var kag=new KAGWindow(); kag.initLogPad(1,1);")));
+    CHECK(fixture.value(TJS_W("storyReady")) == 1);
+    CHECK(fixture.value(TJS_W("padRequests")) == 0);
+    CHECK(fixture.value(TJS_W("kag.logPad===void")) == 1);
+    CHECK(fixture.value(TJS_W("kag.logMode")) == 1);
+    CHECK(fixture.value(TJS_W("savedSettings.logMode")) == 1);
+}
+
 TEST_CASE("an incomplete root patch cannot disable framework script loading",
           "[startup]") {
     StartupFixture fixture;
