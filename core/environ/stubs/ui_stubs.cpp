@@ -40,6 +40,7 @@
 #include "TVPWindow.h"
 #include "Application.h"
 #include "HostWindow.h"
+#include "HostViewport.h"
 #include "RenderManager.h"
 #include "GodotRenderManager.h"
 #include "StorageImpl.h"
@@ -1112,7 +1113,7 @@ public:
         tjs_int surface_h = 0;
         GetHostSurfaceSize(static_cast<tjs_int>(tw), static_cast<tjs_int>(th),
                            surface_w, surface_h);
-        tTVPRect surface_rect(0, 0, surface_w, surface_h);
+        const tTVPRect surface_rect = TVPGetHostViewport(tw, th, surface_w, surface_h);
 
         if(g_host_prefer_gpu_frame && !HasHostVideoOverlayFrame()) {
         if(auto *godot_tex = dynamic_cast<GodotTexture2D *>(tex);
@@ -1168,7 +1169,7 @@ public:
         tjs_int surface_h = 0;
         GetHostSurfaceSize(static_cast<tjs_int>(tw), static_cast<tjs_int>(th),
                            surface_w, surface_h);
-        tTVPRect surface_rect(0, 0, surface_w, surface_h);
+        const tTVPRect surface_rect = TVPGetHostViewport(tw, th, surface_w, surface_h);
 
         if(HasHostVideoOverlayFrame()) {
             StoreLatestCpuFrameFromTexture(tex);
@@ -1321,20 +1322,11 @@ public:
             fbH = egl.GetHeight();
         }
         // Compute letterbox/pillarbox viewport to preserve game aspect ratio.
-        float texAspect = static_cast<float>(tw) / static_cast<float>(th);
-        float fbAspect  = static_cast<float>(fbW) / static_cast<float>(fbH);
-        GLsizei vpX = 0, vpY = 0;
-        GLsizei vpW = static_cast<GLsizei>(fbW);
-        GLsizei vpH = static_cast<GLsizei>(fbH);
-        if (texAspect > fbAspect) {
-            vpW = static_cast<GLsizei>(fbW);
-            vpH = static_cast<GLsizei>(static_cast<float>(fbW) / texAspect);
-            vpY = static_cast<GLsizei>((fbH - vpH) / 2);
-        } else if (texAspect < fbAspect) {
-            vpH = static_cast<GLsizei>(fbH);
-            vpW = static_cast<GLsizei>(static_cast<float>(fbH) * texAspect);
-            vpX = static_cast<GLsizei>((fbW - vpW) / 2);
-        }
+        const tTVPRect fitted = TVPGetHostViewport(tw, th, fbW, fbH);
+        const GLsizei vpX = fitted.left;
+        const GLsizei vpY = fitted.top;
+        const GLsizei vpW = fitted.get_width();
+        const GLsizei vpH = fitted.get_height();
         // Clear entire framebuffer to black (produces the letterbox bars)
         glViewport(0, 0, static_cast<GLsizei>(fbW), static_cast<GLsizei>(fbH));
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
@@ -1604,19 +1596,28 @@ private:
             surface_texture_ = new GodotTexture2D(
                 nullptr, 0, static_cast<unsigned int>(surface_w),
                 static_cast<unsigned int>(surface_h), TVPTextureFormat::RGBA);
+            surface_texture_rect_ = tTVPRect(0, 0, 0, 0);
         }
         if (!surface_texture_->EnsureGpuHandle()) {
             return nullptr;
         }
 
         const tTVPRect clip(0, 0, surface_w, surface_h);
+        const tTVPRect fitted =
+            TVPGetHostViewport(source_w, source_h, surface_w, surface_h);
+        // Clear stale content when a different-sized game window becomes
+        // active. Reuse the black bars on subsequent frames.
+        if(fitted != surface_texture_rect_) {
+            if(!surface_texture_->ClearGpu(0xff000000u, clip)) return nullptr;
+            surface_texture_rect_ = fitted;
+        }
         const tTVPPointD dst_pt[6] = {
-            {0.0, 0.0},
-            {static_cast<double>(surface_w), 0.0},
-            {0.0, static_cast<double>(surface_h)},
-            {static_cast<double>(surface_w), 0.0},
-            {0.0, static_cast<double>(surface_h)},
-            {static_cast<double>(surface_w), static_cast<double>(surface_h)},
+            {static_cast<double>(fitted.left), static_cast<double>(fitted.top)},
+            {static_cast<double>(fitted.right), static_cast<double>(fitted.top)},
+            {static_cast<double>(fitted.left), static_cast<double>(fitted.bottom)},
+            {static_cast<double>(fitted.right), static_cast<double>(fitted.top)},
+            {static_cast<double>(fitted.left), static_cast<double>(fitted.bottom)},
+            {static_cast<double>(fitted.right), static_cast<double>(fitted.bottom)},
         };
         const tTVPPointD src_pt[6] = {
             {0.0, 0.0},
@@ -1751,6 +1752,7 @@ private:
     tjs_int last_mouse_x_ = 0;
     tjs_int last_mouse_y_ = 0;
     GodotTexture2D *surface_texture_ = nullptr;
+    tTVPRect surface_texture_rect_;
 
 #if defined(KRKR_ENABLE_GPU_BRIDGE)
     // Blit resources for rendering to external GPU targets.
