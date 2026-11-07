@@ -3,14 +3,21 @@
 
 #include "EngineLoop.h"
 #include "EventIntf.h"
+#include "GodotRenderManager.h"
+#include "HostViewport.h"
+#include "HostWindow.h"
+#include "LayerImpl.h"
 #include "ScriptMgnIntf.h"
 #include "StorageIntf.h"
 #include "SysInitIntf.h"
 #include "SystemControl.h"
 #include "WindowIntf.h"
+#include "WindowImpl.h"
 #include "tvpgl.h"
 
 extern tTJS *TVPScriptEngine;
+extern "C" void TVPHostSetSurfaceSize(uint32_t width, uint32_t height);
+extern "C" void TVPHostSetPreferGpuFrame(bool enabled);
 
 namespace {
 class WindowRuntime {
@@ -63,11 +70,11 @@ public:
         TVPScriptEngine->EvalExpression(expression, &result);
         return result.AsInteger();
     }
-    bool send(uint32_t type) {
+    bool send(uint32_t type, int x = 200, int y = 100) {
         EngineInputEvent event;
         event.type = type;
-        event.x = 200;
-        event.y = 100;
+        event.x = x;
+        event.y = y;
         event.delta_y = 1;
         event.key_code = 65;
         event.unicode_codepoint = 0x4e2d;
@@ -126,4 +133,56 @@ TEST_CASE("host input is unavailable when every window is hidden",
     runtime.run(TJS_W("main.visible = true; setup.visible = true;"));
     REQUIRE(runtime.send(kEngineInputKeyDown));
     CHECK(runtime.value(TJS_W("setup.keys")) == 1);
+}
+
+TEST_CASE("host presentation fits both wide and tall surfaces",
+          "[render][window]") {
+    CHECK(TVPGetHostViewport(1024, 768, 1920, 1080) ==
+          tTVPRect(240, 0, 1680, 1080));
+    CHECK(TVPGetHostViewport(1920, 1080, 1024, 768) ==
+          tTVPRect(0, 96, 1024, 672));
+    CHECK(TVPGetHostViewport(1280, 720, 1920, 1080) ==
+          tTVPRect(0, 0, 1920, 1080));
+    CHECK(TVPGetHostViewport(1024, 768, 0, 1080).is_empty());
+}
+
+TEST_CASE("host raw frames map pointer input through the fitted viewport",
+          "[input][render][window]") {
+    WindowRuntime runtime;
+    auto *global = TVPScriptEngine->GetGlobalNoAddRef();
+    auto *klass = TVPCreateNativeClass_Layer();
+    tTJSVariant value(klass);
+    global->PropSet(TJS_MEMBERENSURE, TJS_W("Layer"), nullptr, &value, global);
+    klass->Release();
+    runtime.run(TJS_W(
+        "setup.visible = false; main.visible = true;\n"
+        "var mouseX = -1, mouseY = -1;\n"
+        "class Surface extends Layer {\n"
+        "  function Surface(w) { super.Layer(w, null); }\n"
+        "  function onMouseMove(x, y, shift) { mouseX = x; mouseY = y; }\n"
+        "}\n"
+        "var primary = new Surface(main);\n"
+        "primary.setSize(1024, 768); primary.visible = true;\n"
+        "primary.hitThreshold = 0;\n"));
+    TVPHostSetPreferGpuFrame(false);
+    TVPHostSetSurfaceSize(1920, 1080);
+    GodotTexture2D texture(nullptr, 0, 1024, 768, TVPTextureFormat::RGBA);
+    auto *window = TVPGetHostWindow();
+    REQUIRE(window != nullptr);
+    REQUIRE(window->GetForm() != nullptr);
+    window->GetForm()->UpdateDrawBuffer(&texture);
+    REQUIRE(runtime.send(kEngineInputPointerMove, 240, 0));
+    CHECK(runtime.value(TJS_W("mouseX")) == 0);
+    CHECK(runtime.value(TJS_W("mouseY")) == 0);
+    REQUIRE(runtime.send(kEngineInputPointerMove, 1320, 810));
+    CHECK(runtime.value(TJS_W("mouseX")) == 768);
+    CHECK(runtime.value(TJS_W("mouseY")) == 576);
+    // A live host resize changes the input rectangle with the next frame.
+    TVPHostSetSurfaceSize(1024, 1024);
+    window->GetForm()->UpdateDrawBuffer(&texture);
+    REQUIRE(runtime.send(kEngineInputPointerMove, 256, 320));
+    CHECK(runtime.value(TJS_W("mouseX")) == 256);
+    CHECK(runtime.value(TJS_W("mouseY")) == 192);
+    runtime.run(TJS_W("invalidate primary;"));
+    TVPHostSetSurfaceSize(1920, 1080);
 }
