@@ -8,6 +8,9 @@
 
 #include <cstdlib>
 
+#include "tjsCommHead.h"
+#include "SysInitIntf.h"
+
 bool TVPIsConsoleLogFileEnabled() { return false; }
 
 int main(int argc, char *argv[]) {
@@ -28,6 +31,11 @@ int main(int argc, char *argv[]) {
     static auto plugin_logger = spdlog::stdout_color_mt("plugin");
 
     int result = Catch::Session().run(argc, argv);
+
+    // Plugin tests can start engine workers (for example the tick-count
+    // watcher). Join them through the normal engine shutdown path before
+    // process-wide mutexes and other static objects are destroyed.
+    TVPSystemUninit();
 
     return result;
 }
