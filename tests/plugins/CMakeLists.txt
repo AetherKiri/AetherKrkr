@@ -24,6 +24,7 @@ set(_ENGINE_API_TEXT_TRANSFORM_SOURCE "${KRKR2_TEXT_TRANSFORM_SOURCE}")
 
 add_executable(motionplayer-dll
     main.cpp
+    runtime-shutdown.cpp
     motionplayer-dll.cpp
     psb-media.cpp
     registry.cpp
