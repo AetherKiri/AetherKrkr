@@ -59,10 +59,10 @@ target_link_libraries(${PROJECT_NAME} PUBLIC tjs2 PRIVATE core_base_module core_
 
 find_package(7zip CONFIG REQUIRED)
 find_package(tinyxml2 CONFIG REQUIRED)
-find_package(unofficial-minizip CONFIG REQUIRED)
+find_package(minizip CONFIG REQUIRED)
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
         7zip::7zip
-        unofficial::minizip::minizip
+        $<IF:$<TARGET_EXISTS:MINIZIP::minizip>,MINIZIP::minizip,MINIZIP::minizipstatic>
         tinyxml2::tinyxml2
 )

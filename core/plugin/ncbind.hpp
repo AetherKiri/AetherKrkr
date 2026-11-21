@@ -244,9 +244,10 @@ struct ncbTypeConvertor {
 	private:
 		typedef char OK;
 		typedef struct { char ng[2]; } NG;
-		static OK check(TO) {};
-		static NG check(...) {};
-		static FROM wrap() {};
+		// Only used in the unevaluated sizeof expression below.
+		static OK check(TO);
+		static NG check(...);
+		static FROM wrap();
 	public:
 		enum {
 			Exists = (sizeof(check(wrap())) == sizeof(OK)),
