@@ -93635,14 +93635,20 @@ SQLITE_PRIVATE Select *sqlite3SelectNew(
   Expr *pOffset         /* OFFSET value.  NULL means no offset */
 ){
   Select *pNew;
-  Select standin;
   sqlite3 *db = pParse->db;
   pNew = sqlite3DbMallocZero(db, sizeof(*pNew) );
   assert( db->mallocFailed || !pOffset || pLimit ); /* OFFSET implies LIMIT */
   if( pNew==0 ){
     assert( db->mallocFailed );
-    pNew = &standin;
-    memset(pNew, 0, sizeof(*pNew));
+    sqlite3ExprListDelete(db, pEList);
+    sqlite3SrcListDelete(db, pSrc);
+    sqlite3ExprDelete(db, pWhere);
+    sqlite3ExprListDelete(db, pGroupBy);
+    sqlite3ExprDelete(db, pHaving);
+    sqlite3ExprListDelete(db, pOrderBy);
+    sqlite3ExprDelete(db, pLimit);
+    sqlite3ExprDelete(db, pOffset);
+    return 0;
   }
   if( pEList==0 ){
     pEList = sqlite3ExprListAppend(pParse, 0, sqlite3Expr(db,TK_ALL,0));
@@ -93662,14 +93668,12 @@ SQLITE_PRIVATE Select *sqlite3SelectNew(
   pNew->addrOpenEphm[0] = -1;
   pNew->addrOpenEphm[1] = -1;
   pNew->addrOpenEphm[2] = -1;
-  if( db->mallocFailed ) {
+  if( db->mallocFailed ){
     clearSelect(db, pNew);
-    if( pNew!=&standin ) sqlite3DbFree(db, pNew);
-    pNew = 0;
-  }else{
-    assert( pNew->pSrc!=0 || pParse->nErr>0 );
+    sqlite3DbFree(db, pNew);
+    return 0;
   }
-  assert( pNew!=&standin );
+  assert( pNew->pSrc!=0 || pParse->nErr>0 );
   return pNew;
 }
 
