@@ -340,9 +340,11 @@ void openExternal(const ttstr &target, const ttstr &args = ttstr()) {
     std::string command = "open " + shellQuote(toUtf8(target));
     if(!args.IsEmpty())
         command += " --args " + toUtf8(args);
-    std::system(command.c_str());
+    if(std::system(command.c_str()) != 0)
+        logCompatOnce(TJS_W("process.dll"), TJS_W("external process launch failed"));
 #else
-    std::system(composeCommand(target, args).c_str());
+    if(std::system(composeCommand(target, args).c_str()) != 0)
+        logCompatOnce(TJS_W("process.dll"), TJS_W("external process launch failed"));
 #endif
 }
 
@@ -358,7 +360,8 @@ tjs_int spawnShellCommand(const std::string &command) {
                    const_cast<char *const *>(argv), environ) == 0)
         return static_cast<tjs_int>(pid);
 #else
-    std::system((command + " &").c_str());
+    if(std::system((command + " &").c_str()) != 0)
+        logCompatOnce(TJS_W("process.dll"), TJS_W("shell command launch failed"));
 #endif
     return 0;
 }

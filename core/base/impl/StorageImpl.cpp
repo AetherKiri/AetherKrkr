@@ -16,6 +16,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <algorithm>
 #include <set>
 #include <sys/stat.h>
@@ -850,37 +851,34 @@ tTVPLocalFileStream::tTVPLocalFileStream(const ttstr &origname,
 #ifdef _WIN32
     std::wstring wpath(reinterpret_cast<const wchar_t *>(localname.c_str()),
                        localname.GetLen());
-    Handle = _wopen(wpath.c_str(), rw, 0666);
-    if(Handle < 0) {
-        if(access == TJS_BS_APPEND || access == TJS_BS_UPDATE) {
-            Handle = _wopen(wpath.c_str(), O_RDONLY, 0666);
-            if(Handle >= 0) {
-                tjs_uint64 size = tTVPLocalFileStream::GetSize();
-                if(size < 4 * 1024 * 1024) {
-                    MemBuffer = new tTVPMemoryStream();
-                    MemBuffer->SetSize(size);
-                    read(Handle, MemBuffer->GetInternalBuffer(), size);
-                }
-                close(Handle);
-                Handle = -1;
-            }
-        }
-        if(!MemBuffer)
-            TVPThrowExceptionMessage(TVPCannotOpenStorage, origname);
-    }
+    const auto openLocal = [&](int flags) { return _wopen(wpath.c_str(), flags, 0666); };
 #else
     tTJSNarrowStringHolder holder(localname.c_str());
-    Handle = open(holder, rw, 0666);
+    const auto openLocal = [&](int flags) { return open(holder, flags, 0666); };
+#endif
+    Handle = openLocal(rw);
     if(Handle < 0) {
         if(access == TJS_BS_APPEND || access == TJS_BS_UPDATE) {
-            // use whole file writing
-            Handle = open(holder, O_RDONLY);
+#ifdef _WIN32
+            Handle = openLocal(O_RDONLY | O_BINARY);
+#else
+            Handle = openLocal(O_RDONLY);
+#endif
             if(Handle >= 0) {
-                tjs_uint64 size = tTVPLocalFileStream::GetSize();
-                if(size < 4 * 1024 * 1024) { // only support file size <= 4M
-                    MemBuffer = new tTVPMemoryStream();
-                    MemBuffer->SetSize(size);
-                    read(Handle, MemBuffer->GetInternalBuffer(), size);
+                try {
+                    const auto size = tTVPLocalFileStream::GetSize();
+                    if(size < 4 * 1024 * 1024) {
+                        auto buffer = std::make_unique<tTVPMemoryStream>();
+                        buffer->SetSize(size);
+                        if(size > 0) {
+                            tTVPLocalFileStream::ReadBuffer(buffer->GetInternalBuffer(),
+                                                          static_cast<tjs_uint>(size));
+                        }
+                        MemBuffer = buffer.release();
+                    }
+                } catch(...) {
+                    close(Handle);
+                    throw;
                 }
                 close(Handle);
                 Handle = -1;
@@ -889,7 +887,6 @@ tTVPLocalFileStream::tTVPLocalFileStream(const ttstr &origname,
         if(!MemBuffer)
             TVPThrowExceptionMessage(TVPCannotOpenStorage, origname);
     }
-#endif
     // push current tick as an environment noise
     uint32_t tick = TVPGetRoughTickCount32();
     TVPPushEnvironNoise(&tick, sizeof(tick));

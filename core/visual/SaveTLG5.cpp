@@ -12,10 +12,7 @@
 #include "SaveTLG.h"
 
 //---------------------------------------------------------------------------
-SlideCompressor::SlideCompressor() {
-    S = 0;
-    for(int i = 0; i < SLIDE_N + SLIDE_M; i++)
-        Text[i] = 0;
+SlideCompressor::SlideCompressor() : Text{}, S(0) {
     for(int i = 0; i < 256 * 256; i++)
         Map[i] = -1;
     for(int i = 0; i < SLIDE_N; i++)
@@ -54,7 +51,7 @@ int SlideCompressor::GetMatch(const unsigned char *cur, int curlen, int &pos,
                 if(place_org <= s && s < lim)
                     lim = s;
             }
-            while(Text[place] == *(c++) && place < lim)
+            while(place < lim && Text[place] == *(c++))
                 place++;
             int matchlen = place - place_org;
             if(matchlen > maxlen)

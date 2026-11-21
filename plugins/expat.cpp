@@ -280,10 +280,17 @@ private:
         if(!parser_)
             return;
         lastError_ = XML_GetErrorCode(parser_);
+#if XML_MAJOR_VERSION > 2 || (XML_MAJOR_VERSION == 2 && XML_MINOR_VERSION >= 9)
+        currentByteIndex_ = XML_GetCurrentByteIndex64(parser_);
+        currentLineNumber_ = XML_GetCurrentLineNumber64(parser_);
+        currentColumnNumber_ = XML_GetCurrentColumnNumber64(parser_);
+        currentByteCount_ = XML_GetCurrentByteCount64(parser_);
+#else
         currentByteIndex_ = XML_GetCurrentByteIndex(parser_);
         currentLineNumber_ = XML_GetCurrentLineNumber(parser_);
         currentColumnNumber_ = XML_GetCurrentColumnNumber(parser_);
         currentByteCount_ = XML_GetCurrentByteCount(parser_);
+#endif
     }
 
     XML_Parser parser_ = nullptr;

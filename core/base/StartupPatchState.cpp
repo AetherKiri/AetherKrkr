@@ -140,18 +140,21 @@ void tTVPStartupPatchState::PreserveChanges(const tTVPStartupPatchState &before)
         for(const auto &binding : object.bindings)
             newBindings.emplace(BindingName(binding.name), &binding);
         auto &bindings = saved.bindings;
-        for(const auto &[name, old] : oldBindings) {
+        for(const auto &old : oldBindings) {
+            const auto &name = old.first;
             if(!newBindings.count(name))
                 bindings.erase(std::remove_if(bindings.begin(), bindings.end(),
                     [&](const Binding &value) { return BindingName(value.name) == name; }),
                     bindings.end());
         }
-        for(const auto &[name, value] : newBindings) {
+        for(const auto &binding : newBindings) {
+            const auto &name = binding.first;
+            const auto *value = binding.second;
             const auto old = oldBindings.find(name);
             if(old != oldBindings.end() && old->second->flags == value->flags &&
                old->second->value.DiscernCompare(value->value)) continue;
             auto found = std::find_if(bindings.begin(), bindings.end(),
-                [&](const Binding &binding) { return BindingName(binding.name) == name; });
+                [&](const Binding &item) { return BindingName(item.name) == name; });
             if(found == bindings.end()) bindings.push_back(*value);
             else *found = *value;
         }

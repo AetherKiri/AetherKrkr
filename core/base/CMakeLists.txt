@@ -66,7 +66,7 @@ find_package(LibArchive REQUIRED)
 find_package(LibXml2 REQUIRED)
 find_package(SDL2 CONFIG REQUIRED)
 find_package(zstd CONFIG REQUIRED)
-find_package(unofficial-minizip CONFIG REQUIRED)
+find_package(minizip CONFIG REQUIRED)
 find_package(unofficial-sodium CONFIG REQUIRED)
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
@@ -79,7 +79,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
 
     $<TARGET_NAME_IF_EXISTS:SDL2::SDL2main>
     $<IF:$<TARGET_EXISTS:SDL2::SDL2>,SDL2::SDL2,SDL2::SDL2-static>
-    unofficial::minizip::minizip
+    $<IF:$<TARGET_EXISTS:MINIZIP::minizip>,MINIZIP::minizip,MINIZIP::minizipstatic>
 )
 
 # Static libarchive consumers need liblzma (xz filters) whenever libarchive
