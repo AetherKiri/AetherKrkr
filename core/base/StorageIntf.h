@@ -83,6 +83,12 @@ public:
 private:
     void AddToHash();
 
+protected:
+    // Canonical names are indexed on first lookup and take priority over aliases.
+    void AddLookupAlias(const ttstr &normalizedName, tjs_uint index) {
+        Hash.Add(normalizedName, index);
+    }
+
 public:
     virtual tTJSBinaryStream *CreateStream(const ttstr &name);
     virtual bool IsExistent(const ttstr &name);

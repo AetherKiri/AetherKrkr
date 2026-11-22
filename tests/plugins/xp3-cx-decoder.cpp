@@ -199,18 +199,25 @@ TEST_CASE("XP3 v3 mapped files supersede literal-name placeholders") {
 
 TEST_CASE("XP3 eliF path digests resolve files with identical content hash fields") {
     const bool normalize = GENERATE(false, true);
+    const bool digestIsAuthoredName = GENERATE(false, true);
+    CAPTURE(normalize, digestIsAuthoredName);
     Bytes archive{'X', 'P', '3', 13, 10, 32, 10, 26, 0x8b, 0x67, 1};
     archive.resize(19);
     Bytes files;
     appendFile(archive, files, "STARTUP.TJS", 0, {'?'}, true);
     appendFile(archive, files, "9dc21133ca92fb9688def93e4f119d92", 0, {'A'}, true);
-    appendFile(archive, files, "d09b15e74c06935873a0d5706d086018", 0, {'B'}, true);
+    appendFile(archive, files, "D09B15E74C06935873A0D5706D086018", 0, {'B'}, true);
     appendFile(archive, files, "plain.txt", 0, {'C'}, false);
+    if(digestIsAuthoredName)
+        appendFile(archive, files, "6b17f4aad6596baf907117c3339e977f", 0, {'D'}, false);
 
     Bytes paths;
     // Mapping order differs from File order. Exercise both forms of the
     // optional UTF-16 terminator, inside and after the length field's count.
-    for(std::u16string name : {u"startup.tjs", u"UI/音声.txt"}) {
+    std::vector<std::u16string> names{u"startup.tjs", u"UI/音声.txt"};
+    if(digestIsAuthoredName)
+        names.emplace_back(u"9dc21133ca92fb9688def93e4f119d92");
+    for(const auto &name : names) {
         Bytes mapping;
         appendLE(mapping, 0, 4);
         appendLE(mapping, name.size() + (name == u"UI/音声.txt"), 2);
@@ -235,8 +242,9 @@ TEST_CASE("XP3 eliF path digests resolve files with identical content hash field
         REQUIRE(output.good());
     }
     tTVPXP3Archive opened(ttstr(fixture.path.string()), nullptr, -1, normalize);
-    REQUIRE(opened.GetCount() == 3);
+    REQUIRE(opened.GetCount() == (digestIsAuthoredName ? 4 : 3));
     const auto checkFile = [&](const tjs_char *name, char expected) {
+        REQUIRE(opened.IsExistent(name));
         std::unique_ptr<tTJSBinaryStream> stream{opened.CreateStream(name)};
         REQUIRE(stream);
         REQUIRE(stream->GetSize() == 1);
@@ -247,6 +255,11 @@ TEST_CASE("XP3 eliF path digests resolve files with identical content hash field
     checkFile(TJS_W("startup.tjs"), 'B');
     checkFile(TJS_W("ui/音声.txt"), 'A');
     checkFile(TJS_W("plain.txt"), 'C');
+    checkFile(TJS_W("d09b15e74c06935873a0d5706d086018"), 'B');
+    // An authored path takes precedence when it spells another file's digest.
+    checkFile(TJS_W("9dc21133ca92fb9688def93e4f119d92"), digestIsAuthoredName ? 'D' : 'A');
+    if(digestIsAuthoredName)
+        checkFile(TJS_W("6b17f4aad6596baf907117c3339e977f"), 'D');
     if(!normalize)
         CHECK(opened.GetName(0) == TJS_W("UI/音声.txt"));
 }

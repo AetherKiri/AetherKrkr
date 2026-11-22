@@ -723,6 +723,7 @@ void tTVPXP3Archive::Init(tTJSBinaryStream *st, tjs_int64 off,
                item.Name.GetLen() == 32) {
                 const auto path = pathsByDigest.find(item.Name.AsLowerCase());
                 if(path != pathsByDigest.end()) {
+                    item.StoredDigest = path->first;
                     item.Name = path->second;
                     if(normalizeName)
                         NormalizeInArchiveStorageName(item.Name);
@@ -770,6 +771,14 @@ void tTVPXP3Archive::Init(tTJSBinaryStream *st, tjs_int64 off,
         // specification)
         if(normalizeName)
             std::stable_sort(ItemVector.begin(), ItemVector.end());
+        // Register the on-disk names against their final stream indices.
+        if(!pathsByDigest.empty()) {
+            for(tjs_uint i = 0; i < ItemVector.size(); ++i) {
+                const auto &digest = ItemVector[i].StoredDigest;
+                if(!digest.IsEmpty())
+                    AddLookupAlias(digest, i);
+            }
+        }
     } catch(...) {
         if(indexdata)
             delete[] indexdata;

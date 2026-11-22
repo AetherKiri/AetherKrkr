@@ -109,6 +109,7 @@ class tTVPXP3Archive : public tTVPArchive {
 public:
     struct tArchiveItem {
         ttstr Name;
+        ttstr StoredDigest;
         tjs_uint32 FileHash{};
         tjs_uint32 Flags{};
         bool HasMappedName = false;
