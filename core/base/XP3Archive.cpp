@@ -13,6 +13,7 @@
 
 #include "XP3Archive.h"
 #include "XP3ArchiveCxDecoder.h"
+#include "md5.h"
 #include "MsgIntf.h"
 #include "DebugIntf.h"
 #include "EventIntf.h"
@@ -359,6 +360,52 @@ bool TVPIsXP3Archive(const ttstr &name) {
 //---------------------------------------------------------------------------
 namespace {
 
+ttstr ReadXP3MappedName(const tjs_uint8 *record, tjs_uint size) {
+    if(size < 6)
+        return {};
+    const tjs_uint length = record[4] | (tjs_uint(record[5]) << 8);
+    if(!length || length > (size - 6) / 2)
+        return {};
+
+    ttstr name{tTJSStringBufferLength(length)};
+    auto *text = name.Independ();
+    const auto *utf16 = record + 6;
+    for(tjs_uint i = 0; i < length; ++i) {
+        text[i] = utf16[2 * i] | (tjs_uint(utf16[2 * i + 1]) << 8);
+        if(!text[i]) {
+            if(i + 1 != length)
+                return {};
+            name.FixLen();
+        }
+    }
+    return name;
+}
+
+// eliF pairs the authored path with a File.info name containing the MD5 of
+// its lowercase UTF-16LE bytes. Patch archives can give every file hash zero.
+ttstr XP3PathDigest(const ttstr &name) {
+    const ttstr lower = name.AsLowerCase();
+    std::vector<tjs_uint8> bytes;
+    bytes.reserve(lower.GetLen() * 2);
+    for(const auto *c = lower.c_str(); *c; ++c) {
+        bytes.push_back(static_cast<tjs_uint8>(*c));
+        bytes.push_back(static_cast<tjs_uint8>(*c >> 8));
+    }
+    md5_state_t state;
+    md5_byte_t digest[16];
+    md5_init(&state);
+    md5_append(&state, bytes.data(), static_cast<int>(bytes.size()));
+    md5_finish(&state, digest);
+
+    constexpr tjs_char hex[] = TJS_W("0123456789abcdef");
+    tjs_char key[33]{};
+    for(size_t i = 0; i < sizeof(digest); ++i) {
+        key[2 * i] = hex[digest[i] >> 4];
+        key[2 * i + 1] = hex[digest[i] & 15];
+    }
+    return ttstr(key);
+}
+
 bool TVPReadXP3ItemHeader(tTJSBinaryStream *stream,
                           const tTVPXP3Archive::tArchiveItem &item,
                           std::array<tjs_uint8, 8> &header) {
@@ -425,6 +472,7 @@ void tTVPXP3Archive::Init(tTJSBinaryStream *st, tjs_int64 off,
                                          0x6c /*'l'*/, 0x72 /*'r'*/ };
     static const tjs_uint8 cn_hnfn[] = { 0x68 /*'h'*/, 0x6e /*'n'*/,
                                          0x66 /*'f'*/, 0x6e /*'n'*/ };
+    static const tjs_uint8 cn_eliF[] = {'e', 'l', 'i', 'F'};
 
     TVPAddLog(TVPFormatMessage(
         TVPInfoTryingToReadXp3VirtualFileSystemInformationFrom, ArchiveName));
@@ -439,6 +487,7 @@ void tTVPXP3Archive::Init(tTJSBinaryStream *st, tjs_int64 off,
         size_t Next = 0;
     };
     std::map<tjs_uint32, tXP3FilenameMappings> filenameMap;
+    std::map<ttstr, ttstr> pathsByDigest;
     try {
         // retrieve archive offset
         if(off < 0)
@@ -449,8 +498,8 @@ void tTVPXP3Archive::Init(tTJSBinaryStream *st, tjs_int64 off,
 
         // read all XP3 indices
         while(true) {
-            if(indexdata)
-                delete[] indexdata;
+            delete[] indexdata;
+            indexdata = nullptr;
 
             tjs_uint64 index_ofs = st->ReadI64LE();
             st->SetPosition(index_ofs + offset);
@@ -515,20 +564,12 @@ void tTVPXP3Archive::Init(tTJSBinaryStream *st, tjs_int64 off,
                 if(!FindChunk(indexdata, cn_hnfn, ch_hnfn_start,
                               ch_hnfn_size))
                     break;
-                if(ch_hnfn_size >= 6) {
+                const auto name = ReadXP3MappedName(indexdata + ch_hnfn_start,
+                                                    ch_hnfn_size);
+                if(!name.IsEmpty()) {
                     const tjs_uint32 hash =
                         ReadI32FromMem(indexdata + ch_hnfn_start);
-                    const tjs_int nameLength =
-                        ReadI16FromMem(indexdata + ch_hnfn_start + 4);
-                    const tjs_uint64 requiredSize =
-                        6u + static_cast<tjs_uint64>(nameLength) * 2u;
-                    if(nameLength >= 0 && requiredSize <= ch_hnfn_size) {
-                        filenameMap[hash].Names.push_back(
-                            TVPStringFromBMPUnicode(
-                                reinterpret_cast<const tjs_uint16 *>(
-                                    indexdata + ch_hnfn_start + 6),
-                                nameLength));
-                    }
+                    filenameMap[hash].Names.push_back(name);
                 }
                 ch_hnfn_start += ch_hnfn_size;
                 ch_hnfn_size = index_size - ch_hnfn_start;
@@ -637,21 +678,27 @@ void tTVPXP3Archive::Init(tTJSBinaryStream *st, tjs_int64 off,
                 Count++;
             }
 
-            // --- BROADCAST UNKNOWN CHUNKS TO PLUGINS ---
+            // Read path aliases and offer other extension chunks to plugins.
             {
                 tjs_uint ch_pos = 0;
-                while(ch_pos + 12 <= index_size) {
+                while(index_size - ch_pos >= 12) {
                     tjs_uint8 chunk_name[4];
                     std::memcpy(chunk_name, indexdata + ch_pos, 4);
                     tjs_uint64 chunk_size64 = ReadI64FromMem(indexdata + ch_pos + 4);
-                    tjs_uint chunk_size = (tjs_uint)chunk_size64;
-                    
-                    if (ch_pos + 12 + chunk_size > index_size) break;
+                    if(chunk_size64 > index_size - ch_pos - 12)
+                        TVPThrowExceptionMessage(TVPReadError);
+                    const auto chunk_size = static_cast<tjs_uint>(chunk_size64);
+                    const auto *chunk_data = indexdata + ch_pos + 12;
 
-                    if (std::memcmp(chunk_name, cn_File, 4) != 0 && std::memcmp(chunk_name, cn_hnfn, 4) != 0) {
+                    if(std::memcmp(chunk_name, cn_eliF, 4) == 0) {
+                        const auto name = ReadXP3MappedName(chunk_data, chunk_size);
+                        if(!name.IsEmpty())
+                            pathsByDigest.emplace(XP3PathDigest(name), name);
+                    } else if(std::memcmp(chunk_name, cn_File, 4) != 0 &&
+                              std::memcmp(chunk_name, cn_hnfn, 4) != 0) {
                         std::lock_guard<std::mutex> lock(TVPXP3UnknownChunkFiltersMutex);
                         for (auto filter : TVPXP3UnknownChunkFilters) {
-                            filter(this, st, offset, chunk_name, indexdata + ch_pos + 12, chunk_size);
+                            filter(this, st, offset, chunk_name, chunk_data, chunk_size);
                         }
                     }
                     ch_pos += 12 + chunk_size;
@@ -662,20 +709,35 @@ void tTVPXP3Archive::Init(tTJSBinaryStream *st, tjs_int64 off,
                 break; // continue reading index when the bit sets
         }
 
-        // A v3 archive can contain a literal-name placeholder alongside the
-        // real file named by hnfn. Keep the mapped file authoritative: exposing
-        // both under the same name lets the archive hash select the placeholder
-        // (for example a startup script reporting a corrupt executable).
+        // Mapped files take precedence over literal placeholders with the
+        // same lookup name, including when enumerating original-case names.
+        const auto lookupName = [normalizeName](ttstr name) {
+            if(!normalizeName)
+                NormalizeInArchiveStorageName(name);
+            return name;
+        };
         std::set<ttstr> mappedNames;
-        for(const auto &item : ItemVector) {
+        for(auto &item : ItemVector) {
+            // The eliF table can follow its File entries in a later index.
+            if(!pathsByDigest.empty() && !item.HasMappedName &&
+               item.Name.GetLen() == 32) {
+                const auto path = pathsByDigest.find(item.Name.AsLowerCase());
+                if(path != pathsByDigest.end()) {
+                    item.Name = path->second;
+                    if(normalizeName)
+                        NormalizeInArchiveStorageName(item.Name);
+                    item.HasMappedName = true;
+                }
+            }
             if(item.HasMappedName)
-                mappedNames.insert(item.Name);
+                mappedNames.insert(lookupName(item.Name));
         }
-        ItemVector.erase(std::remove_if(ItemVector.begin(), ItemVector.end(),
-            [&](const tArchiveItem &item) {
-                return !item.HasMappedName &&
-                    mappedNames.find(item.Name) != mappedNames.end();
-            }), ItemVector.end());
+        if(!mappedNames.empty()) {
+            ItemVector.erase(std::remove_if(ItemVector.begin(), ItemVector.end(),
+                [&](const tArchiveItem &item) {
+                    return !item.HasMappedName && mappedNames.count(lookupName(item.Name));
+                }), ItemVector.end());
+        }
         Count = static_cast<tjs_int>(ItemVector.size());
 
         // A content hash alone is not enough to select Cx: translated XP3s
@@ -799,29 +861,19 @@ bool tTVPXP3Archive::IsExistent(const ttstr &name) {
 //---------------------------------------------------------------------------
 bool tTVPXP3Archive::FindChunk(const tjs_uint8 *data, const tjs_uint8 *name,
                                tjs_uint &start, tjs_uint &size) {
-    tjs_uint start_save = start;
-    tjs_uint size_save = size;
-
-    tjs_uint pos = 0;
-    while(pos < size) {
-        bool found = !memcmp(data + start, name, 4);
-        start += 4;
-        tjs_uint64 r_size = ReadI64FromMem(data + start);
-        start += 8;
-        tjs_uint size_chunk = (tjs_uint)r_size;
-        if(size_chunk != r_size)
+    tjs_uint offset = 0;
+    while(size - offset >= 12) {
+        const auto *header = data + start + offset;
+        const tjs_uint64 chunkSize = ReadI64FromMem(header + 4);
+        if(chunkSize > size - offset - 12)
             TVPThrowExceptionMessage(TVPReadError);
-        if(found) {
-            // found
-            size = size_chunk;
+        if(!memcmp(header, name, 4)) {
+            start += offset + 12;
+            size = static_cast<tjs_uint>(chunkSize);
             return true;
         }
-        start += size_chunk;
-        pos += size_chunk + 4 + 8;
+        offset += 12 + static_cast<tjs_uint>(chunkSize);
     }
-
-    start = start_save;
-    size = size_save;
     return false;
 }
 
