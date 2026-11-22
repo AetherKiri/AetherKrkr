@@ -1,3 +1,4 @@
+#include <cstdio>
 #include <cstdint>
 #include <uchardet.h>
 #include <zlib.h>
@@ -630,41 +631,34 @@ public:
     }
 
     ~tTVPTextWriteStream() override {
-        if(_cryptMode == 2) {
+        if(!_zStream)
+            return;
 
-            if(!_compressionFailed) {
-                try {
-                    // close zlib stream
-                    int result = 0;
-                    do {
-                        result = deflate(_zStream.get(), Z_FINISH);
-                        if(result != Z_OK && result != Z_STREAM_END) {
-                            TVPThrowExceptionMessage(TVPCompressionFailed);
-                        }
-                        _stream->WriteBuffer(_compressionBuffer.data(),
-                                             COMPRESSION_BUFFER_SIZE -
-                                                 _zStream->avail_out);
-                        _zStream->next_out = _compressionBuffer.data();
-                        _zStream->avail_out = COMPRESSION_BUFFER_SIZE;
-                    } while(result != Z_STREAM_END);
-
-                    // rollback and write compression size.
-                    _stream->SetPosition(_compressionSizePosition);
-                    WriteI64LE(_zStream->total_out);
-                    WriteI64LE(_zStream->total_in);
-                } catch(...) {
-                    // delete zlib compress stream
-                    if(_zStream) {
-                        deflateEnd(_zStream.get());
+        if(!_compressionFailed) {
+            try {
+                int result;
+                do {
+                    result = deflate(_zStream.get(), Z_FINISH);
+                    if(result != Z_OK && result != Z_STREAM_END) {
+                        TVPThrowExceptionMessage(TVPCompressionFailed);
                     }
-                    throw;
-                }
-            }
-            // delete zlib compress stream
-            if(_zStream) {
-                deflateEnd(_zStream.get());
+                    _stream->WriteBuffer(_compressionBuffer.data(),
+                                         COMPRESSION_BUFFER_SIZE -
+                                             _zStream->avail_out);
+                    _zStream->next_out = _compressionBuffer.data();
+                    _zStream->avail_out = COMPRESSION_BUFFER_SIZE;
+                } while(result != Z_STREAM_END);
+
+                _stream->SetPosition(_compressionSizePosition);
+                WriteI64LE(_zStream->total_out);
+                WriteI64LE(_zStream->total_in);
+            } catch(...) {
+                // Stream cleanup also runs while unwinding a failed write.
+                std::fputs("Could not finalize a compressed KiriKiri text stream\n",
+                           stderr);
             }
         }
+        deflateEnd(_zStream.get());
     }
 
     void WriteI64LE(tjs_uint64 v) {

@@ -21,6 +21,8 @@ set(PSDPARSE_BUILD_CLI OFF CACHE BOOL "" FORCE)
 add_subdirectory(
     "${AETHERKIRI_PSDPARSE_ROOT}"
     "${CMAKE_CURRENT_BINARY_DIR}/psdparse")
+include("${CMAKE_CURRENT_LIST_DIR}/PreparePsdparse.cmake")
+krkr2_prepare_psdparse("${AETHERKIRI_PSDPARSE_ROOT}")
 
 add_library(${PROJECT_NAME} STATIC)
 
