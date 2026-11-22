@@ -588,12 +588,14 @@ void TVPPreNormalizeStorageName(ttstr &name) {
 // TVPGetTemporaryName
 //---------------------------------------------------------------------------
 static tjs_int TVPProcessID;
+static ttstr TVPHostTemporaryDirectory;
+void TVPSetTemporaryDirectory(const ttstr &path) { TVPHostTemporaryDirectory = path; }
 
 ttstr TVPGetTemporaryName() {
     static tjs_int TVPTempUniqueNum =
         static_cast<tjs_int>(TVPGetRoughTickCount32());
     tjs_int num = TVPTempUniqueNum++;
-    ttstr TVPTempPath = TVPGetAppPath();
+    ttstr TVPTempPath = TVPHostTemporaryDirectory.IsEmpty() ? TVPGetAppPath() : TVPHostTemporaryDirectory;
 
     unsigned char buf[16];
     TVPGetRandomBits128(buf);
