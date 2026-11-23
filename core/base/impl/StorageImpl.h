@@ -14,6 +14,8 @@
 #include "StorageIntf.h"
 #include "UtilStreams.h"
 #include <functional>
+// Embedding hosts keep transient extracted resources in the selected game's cache.
+void TVPSetTemporaryDirectory(const ttstr &path);
 
 #ifndef S_IFMT
 #define S_IFDIR 0x4000 // Directory
