@@ -69,6 +69,19 @@ if(COMMAND aetherkiri_sanitize_openal_link)
     aetherkiri_sanitize_openal_link()
 endif()
 
+# Follows the system default output for every OpenAL device in the process.
+# ALC_SOFT_system_events allows only one event callback per process, so the
+# KiriKiri2 renderer and the runtime bridges in the consuming checkout share
+# this target instead of registering callbacks of their own.
+add_library(aether_openal_device_follower STATIC
+    ${SOUND_PATH}/openal/OpenALDeviceFollower.cpp
+)
+target_include_directories(aether_openal_device_follower PUBLIC
+    ${SOUND_PATH}/openal
+)
+target_compile_features(aether_openal_device_follower PUBLIC cxx_std_17)
+target_link_libraries(aether_openal_device_follower PRIVATE OpenAL::OpenAL)
+
 target_link_libraries(${PROJECT_NAME} PRIVATE
     Vorbis::vorbis
     Vorbis::vorbisfile
@@ -77,4 +90,5 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     Opus::opus
     OpusFile::opusfile
     OpenAL::OpenAL
+    aether_openal_device_follower
 )
