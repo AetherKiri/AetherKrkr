@@ -19,6 +19,7 @@
 #endif
 
 #include "DebugIntf.h"
+#include "OpenALDeviceFollower.h"
 #include "Platform.h"
 #include "SysInitIntf.h"
 #include "TickCount.h"
@@ -1021,8 +1022,10 @@ public:
             alcMakeContextCurrent(nullptr);
             alcDestroyContext(_context);
         }
-        if(_device)
+        if(_device) {
+            aether_openal_untrack_device(_device);
             alcCloseDevice(_device);
+        }
     }
 
     bool Init() override {
@@ -1035,15 +1038,15 @@ public:
             // enumeration supported
             const ALCchar *devices =
                 alcGetString(nullptr, ALC_DEVICE_SPECIFIER);
-            std::vector<std::string> alldev;
             ttstr log(TJS_W("(info) Sound Driver/Device found : "));
             while(*devices) {
                 TVPAddImportantLog(log + devices);
-                alldev.emplace_back(devices);
-                devices += alldev.back().length() + 1;
+                devices += strlen(devices) + 1;
             }
-            _device =
-                alcOpenDevice(alldev.empty() ? nullptr : alldev[0].c_str());
+            // Open the system default output rather than the first
+            // enumerated device: a named device stays pinned to that output,
+            // while the default one can follow later default output changes.
+            _device = alcOpenDevice(nullptr);
         }
         if(!_device)
             return false;
@@ -1054,6 +1057,7 @@ public:
         alcMakeContextCurrent(_context);
         TVPALContext = _context;
         LoadHostLifecycleExtensions();
+        aether_openal_track_device(_device);
 
         return true;
     }
@@ -1137,6 +1141,24 @@ public:
     bool IsSuspendedForHost() const override { return _host_suspended; }
 
     void PollForHost() override {
+        // Move the device when the system default output changes, e.g. when
+        // Bluetooth headphones connect after the game started. A suspended
+        // host owns the device lifecycle, so leave it to ResumeForHost.
+        if(!_host_suspended && _device) {
+            switch(aether_openal_poll_device(_device)) {
+                case AETHER_OPENAL_POLL_REOPENED:
+                    // Reopening keeps sources and buffers, but streams that
+                    // drained while the output was switching have stopped.
+                    RestartLogicalStreams();
+                    LogLifecycleState("default_output_followed");
+                    break;
+                case AETHER_OPENAL_POLL_FAILED:
+                    spdlog::warn("OpenAL could not follow the default output");
+                    break;
+                case AETHER_OPENAL_POLL_IDLE:
+                    break;
+            }
+        }
         if(!_resume_probe_pending)
             return;
         const Uint64 now = SDL_GetTicks64();
